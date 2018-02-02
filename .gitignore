@@ -1,0 +1,9 @@
+# Ignore compiled libraries and executables
+*.o
+*.mod
+*.x
+*.il
+*.a
+
+# Ignore dependency file
+makefile.dep
