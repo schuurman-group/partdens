@@ -1,4 +1,4 @@
- goal: makefile.dep
+goal: makefile.dep
 	make atom_pop.x
 
 MAKEFLAGS = -r
@@ -51,6 +51,10 @@ LIBFC += gamess_internal.o
 LIBFC += import_gamess.o
 LIBFC += os_integral_operators.o
 LIBFC += accuracy.o
+LIBFC += atoms.o
+LIBFC += lebedev.o
+LIBFC += molecular_grid.o
+LIBFC += atomdens.o
 
 #
 # Building the binaries
