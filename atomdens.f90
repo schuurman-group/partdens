@@ -13,7 +13,8 @@ contains
 !
 subroutine psisq(r, nr, Z, chg, norb, niter, thrsh, psi2)
   integer(ik) :: nr, Z, chg, norb, niter
-  real(rk)    :: thrsh, r(nr), psi(norb, nr), psi2(nr)
+  real(rk)    :: thrsh, r(nr)
+  real(ark)   :: psi(norb, nr), psi2(nr)
 
   call psi_integ(r, nr, Z, chg, norb, niter, thrsh, psi)
   psi2 = sum(psi**2, dim=1)
@@ -28,7 +29,8 @@ subroutine psi_integ(r, nr, Z, chg, norb, niter, thrsh, psi)
   integer(ik) :: nnum(norb), lnum(norb), nocc(norb)
   real(rk)    :: dr, thrsh, selfsc, norm, cj
   real(rk)    :: r(nr), zeff(nr), last(nr), resid(nr), fr(nr)
-  real(rk)    :: scr(norb, nr), psi(norb,nr)
+  real(rk)    :: scr(norb, nr)
+  real(ark)   :: psi(norb,nr)
 
   ne = Z - chg
   call get_occ(ne, norb, nnum, lnum, nocc)
@@ -61,7 +63,8 @@ end subroutine psi_integ
 !
 subroutine psi_slater(r, nr, Z, chg, norb, psi)
   integer(ik) :: i, nr, Z, chg, norb, ne, nnum(norb), lnum(norb), nocc(norb)
-  real(rk)    :: ci, scr(norb), r(nr), zeff(nr), psi(norb,nr)
+  real(rk)    :: ci, scr(norb), r(nr), zeff(nr)
+  real(ark)   :: psi(norb,nr)
 
   ne = Z - chg
   call get_occ(ne, norb, nnum, lnum, nocc)
@@ -79,7 +82,8 @@ end subroutine psi_slater
 function r_nl(r, nr, Z, n, l)
   integer(ik) :: i, j, nr, n, l
   real(rk)    :: ak(n-l), ak2(2*(n-l)-1), pwr(2*(n-l)-1)
-  real(rk)    :: r(nr), Z(nr), rho(nr), aterm(nr), norm(nr), r_nl(nr)
+  real(rk)    :: r(nr), Z(nr), rho(nr), aterm(nr), norm(nr)
+  real(ark)   :: r_nl(nr)
 
   rho = 2*Z*r/n
   ! get the expansion coefficients
