@@ -1,5 +1,5 @@
 goal: makefile.dep
-	make atom_pop.x
+	make vddi.x
 
 MAKEFLAGS = -r
 
@@ -46,7 +46,6 @@ LIBFC += math.o
 LIBFC += timer.o
 LIBFC += dgefa.o
 LIBFC += dgedi.o
-LIBFC += atom_pop.o
 LIBFC += gamess_internal.o
 LIBFC += import_gamess.o
 LIBFC += os_integral_operators.o
@@ -55,12 +54,13 @@ LIBFC += atoms.o
 LIBFC += lebedev.o
 LIBFC += molecular_grid.o
 LIBFC += atomdens.o
+LIBFC += vddi.o
 
 #
 # Building the binaries
 #
-atom_pop.x: atom_pop.o $(LIBFC)
-	$(F90) -o atom_pop.x atom_pop.o $(LIBFC) $(LIBS)
+vddi.x: vddi.o $(LIBFC)
+	$(F90) -o vddi.x vddi.o $(LIBFC) $(LIBS)
 
 #
 # Automatically-generated dependencies

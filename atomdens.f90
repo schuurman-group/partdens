@@ -14,7 +14,9 @@ contains
 subroutine psisq(r, nr, Z, chg, norb, niter, thrsh, psi2)
   integer(ik) :: nr, Z, chg, norb, niter
   real(rk)    :: thrsh, r(nr)
-  real(ark)   :: psi(norb, nr), psi2(nr)
+  real(ark)   :: psi2(nr)
+  !
+  real(ark)   :: psi(norb, nr)
 
   call psi_integ(r, nr, Z, chg, norb, niter, thrsh, psi)
   psi2 = sum(psi**2, dim=1)
@@ -25,30 +27,42 @@ end subroutine psisq
 ! Slater's rules for screening S_n(r)
 !
 subroutine psi_integ(r, nr, Z, chg, norb, niter, thrsh, psi)
-  integer(ik) :: i, j, nr, Z, chg, norb, ne, niter
-  integer(ik) :: nnum(norb), lnum(norb), nocc(norb)
-  real(rk)    :: dr, thrsh, selfsc, norm, cj
-  real(rk)    :: r(nr), zeff(nr), last(nr), resid(nr), fr(nr)
-  real(rk)    :: scr(norb, nr)
+  integer(ik) :: nr, Z, chg, norb, niter
+  real(rk)    :: thrsh, r(nr)
   real(ark)   :: psi(norb,nr)
+  !
+  integer(ik) :: i, j, ne, nnum(norb), lnum(norb), nocc(norb)
+  real(rk)    :: dr, selfsc, norm, cj
+  real(rk)    :: zeff(nr), last(nr), resid(nr), fr(nr), scr(norb, nr)
+
 
   ne = Z - chg
+  if (ne <= 0) then
+    psi(:,:) = 0
+    return
+  end if
   call get_occ(ne, norb, nnum, lnum, nocc)
   dr = r(2) - r(1)
+  ! initial guess
   call psi_slater(r, nr, Z, chg, norb, psi)
   last = r**2*sum(psi**2, dim=1)
   do i = 1,niter
+    ! set up integrated screening factor
     do j = 1,norb
       scr(j,:) = cumsum(r**2*psi(j,:)**2, nr)*dr
     end do
     do j = 1,norb
+      ! find self-screening contribution and calculate Z_eff
       selfsc = 0.5*(nocc(j) - 1) / nocc(j)
       zeff = Z - sum(scr(1:j-1,:), dim=1) - selfsc*scr(j,:)
+      ! find the single electron contribution and renormalize
       fr = r_nl(r, nr, zeff, nnum(j), lnum(j))
       norm = sum(r**2*fr**2)*dr
       cj = sqrt(nocc(j) / norm)
+      ! add renormalized component to psi
       psi(j,:) = cj*fr
     end do
+    ! check for convergence
     resid = abs(r**2*sum(psi**2, dim=1) - last)
     if (maxval(resid) < thrsh) then
       return
@@ -62,11 +76,18 @@ end subroutine psi_integ
 ! rules for screen S_n
 !
 subroutine psi_slater(r, nr, Z, chg, norb, psi)
-  integer(ik) :: i, nr, Z, chg, norb, ne, nnum(norb), lnum(norb), nocc(norb)
-  real(rk)    :: ci, scr(norb), r(nr), zeff(nr)
+  integer(ik) :: nr, Z, chg, norb
+  real(rk)    :: r(nr)
   real(ark)   :: psi(norb,nr)
+  !
+  integer(ik) :: i, ne, nnum(norb), lnum(norb), nocc(norb)
+  real(rk)    :: ci, scr(norb), zeff(nr)
 
   ne = Z - chg
+  if (ne <= 0) then
+    psi(:,:) = 0
+    return
+  end if
   call get_occ(ne, norb, nnum, lnum, nocc)
   scr = scrni(nocc, norb)
   do i = 1,norb
@@ -80,10 +101,13 @@ end subroutine psi_slater
 ! Get the radial hydrogenic wavefunction for an n, l pair
 !
 function r_nl(r, nr, Z, n, l)
-  integer(ik) :: i, j, nr, n, l
-  real(rk)    :: ak(n-l), ak2(2*(n-l)-1), pwr(2*(n-l)-1)
-  real(rk)    :: r(nr), Z(nr), rho(nr), aterm(nr), norm(nr)
+  integer(ik) :: nr, n, l
+  real(rk)    :: r(nr), Z(nr)
   real(ark)   :: r_nl(nr)
+  !
+  integer(ik) :: i, j
+  real(rk)    :: rho(nr), aterm(nr), norm(nr)
+  real(rk)    :: ak(n-l), ak2(2*(n-l)-1), pwr(2*(n-l)-1)
 
   rho = 2*Z*r/n
   ! get the expansion coefficients
@@ -118,8 +142,10 @@ end function r_nl
 ! Get a list of integer screening constants using Slater's rules
 !
 function scrni(nocc, norb)
-  integer(ik) :: i, j, norb, nocc(norb)
+  integer(ik) :: norb, nocc(norb)
   real(rk)    :: scrni(norb)
+  !
+  integer(ik) :: i, j
 
   do i = 1,norb
     scrni(i) = 0.5*(nocc(i) - 1)
@@ -134,7 +160,9 @@ end function scrni
 ! number of electrons
 !
 function get_norb(ne)
-  integer(ik) :: l, ne, maxocc, nl, get_norb
+  integer(ik) :: ne
+  !
+  integer(ik) :: l, maxocc, nl, get_norb
 
   get_norb = 0
   maxocc = 0
@@ -156,8 +184,9 @@ end function get_norb
 ! electrons
 !
 subroutine get_occ(ne, norb, nnum, lnum, nocc)
-  integer(ik) :: i, l, nin, maxocc ,ne, norb, nl
-  integer(ik) :: nnum(norb), lnum(norb), nocc(norb)
+  integer(ik) :: ne, norb, nnum(norb), lnum(norb), nocc(norb)
+  !
+  integer(ik) :: i, l, nin, maxocc, nl
 
   nl = 0
   i = 0
@@ -181,23 +210,13 @@ subroutine get_occ(ne, norb, nnum, lnum, nocc)
 end subroutine get_occ
 
 !
-! Generate an equally spaced list of n elements between specified numbers
-!
-function linspace(first, last, n)
-  integer(ik) :: i, n
-  real(rk)    :: first, last, step, list(n), linspace(n)
-
-  list = (/(i, i=0,n-1)/)
-  step = (last - first) / (n - 1)
-  linspace = list*step + first
-end function linspace
-
-!
 ! Return the cumulative sum of a 1D array
 !
 function cumsum(arr, nx)
-  integer(ik) :: i, nx
+  integer(ik) :: nx
   real(rk)    :: arr(nx), cumsum(nx)
+  !
+  integer(ik) :: i
 
   cumsum(1) = arr(1)
   do i = 2,nx
