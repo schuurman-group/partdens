@@ -1,6 +1,6 @@
 !
 ! Build the atomic density using sums of hydrogenic wavefunctions with
-! and integrated screening parameter
+! an integrated form of Slater's rules
 !
 module atomdens
   use accuracy
@@ -32,9 +32,8 @@ subroutine psi_integ(r, nr, Z, chg, norb, niter, thrsh, psi)
   real(ark)   :: psi(norb,nr)
   !
   integer(ik) :: i, j, ne, nnum(norb), lnum(norb), nocc(norb)
-  real(rk)    :: dr, selfsc, norm, cj
-  real(rk)    :: zeff(nr), last(nr), resid(nr), fr(nr), scr(norb, nr)
-
+  real(rk)    :: dr, selfsc, norm, cj, zeff(nr)
+  real(rk)    :: last(nr), resid(nr), fr(nr), scr(norb, nr), sfac(norb, nr)
 
   ne = Z - chg
   if (ne <= 0) then
@@ -49,12 +48,12 @@ subroutine psi_integ(r, nr, Z, chg, norb, niter, thrsh, psi)
   do i = 1,niter
     ! set up integrated screening factor
     do j = 1,norb
-      scr(j,:) = cumsum(r**2*psi(j,:)**2, nr)*dr
+      scr(j,:) = cumsum(r**2*psi(j,:)**2, nr)*dr / nocc(j)
     end do
+    sfac = scrni(nocc, nnum, lnum, norb, scr, nr)
     do j = 1,norb
-      ! find self-screening contribution and calculate Z_eff
-      selfsc = 0.5*(nocc(j) - 1) / nocc(j)
-      zeff = Z - sum(scr(1:j-1,:), dim=1) - selfsc*scr(j,:)
+      ! calculate Z_eff
+      zeff = Z - sfac(j,:)
       ! find the single electron contribution and renormalize
       fr = r_nl(r, nr, zeff, nnum(j), lnum(j))
       norm = sum(r**2*fr**2)*dr
@@ -73,7 +72,7 @@ end subroutine psi_integ
 
 !
 ! Build the components of an atomic wavefunction using Slater's
-! rules for screen S_n
+! rules for screening S_n
 !
 subroutine psi_slater(r, nr, Z, chg, norb, psi)
   integer(ik) :: nr, Z, chg, norb
@@ -81,7 +80,7 @@ subroutine psi_slater(r, nr, Z, chg, norb, psi)
   real(ark)   :: psi(norb,nr)
   !
   integer(ik) :: i, ne, nnum(norb), lnum(norb), nocc(norb)
-  real(rk)    :: ci, scr(norb), zeff(nr)
+  real(rk)    :: ci, scr(norb, nr), sfac(norb, nr), zeff(nr)
 
   ne = Z - chg
   if (ne <= 0) then
@@ -89,9 +88,10 @@ subroutine psi_slater(r, nr, Z, chg, norb, psi)
     return
   end if
   call get_occ(ne, norb, nnum, lnum, nocc)
-  scr = scrni(nocc, norb)
+  scr(:,:) = 1
+  sfac = scrni(nocc, nnum, lnum, norb, scr, nr)
   do i = 1,norb
-    zeff(:) = Z - scr(i)
+    zeff = Z - sfac(i,:)
     ci = sqrt(real(nocc(i)))
     psi(i,:) = ci*r_nl(r, nr, zeff, nnum(i), lnum(i))
   end do
@@ -112,7 +112,7 @@ function r_nl(r, nr, Z, n, l)
   rho = 2*Z*r/n
   ! get the expansion coefficients
   ak(1) = 1
-  aterm = 1
+  aterm(:) = 1
   do i = 1,n-l-1
     ak(i+1) = ak(i)*(i + l - n)/(i*(i + 2*l + 1))
     aterm = aterm + ak(i+1)*rho**i
@@ -139,18 +139,30 @@ function r_nl(r, nr, Z, n, l)
 end function r_nl
 
 !
-! Get a list of integer screening constants using Slater's rules
+! Get r-dependent screening parameters using Slater's rules
 !
-function scrni(nocc, norb)
-  integer(ik) :: norb, nocc(norb)
-  real(rk)    :: scrni(norb)
+function scrni(nocc, nnum, lnum, norb, scr, nr)
+  integer(ik) :: norb, nr, nnum(norb), lnum(norb), nocc(norb)
+  real(rk)    :: scrni(norb, nr), scr(norb, nr)
   !
   integer(ik) :: i, j
 
   do i = 1,norb
-    scrni(i) = 0.5*(nocc(i) - 1)
+    if (nnum(i) == 1) then
+      scrni(i,:) = 0.30*(nocc(i) - 1)*scr(i,:)
+    else if (i < norb .and. lnum(i) == 0) then
+      scrni(i,:) = 0.35*((nocc(i) - 1)*scr(i,:) + nocc(i+1)*scr(i+1,:))
+    else
+      scrni(i,:) = 0.35*(nocc(i) - 1)*scr(i,:)
+    end if
     do j = 1,i-1
-      scrni(i) = scrni(i) + nocc(j)
+      if (lnum(i) < 2 .and. nnum(j) == nnum(i)) then
+        scrni(i,:) = scrni(i,:) + 0.35*nocc(j)*scr(j,:)
+      else if (lnum(i) < 2 .and. nnum(j) == nnum(i) - 1) then
+        scrni(i,:) = scrni(i,:) + 0.85*nocc(j)*scr(j,:)
+      else
+        scrni(i,:) = scrni(i,:) + nocc(j)*scr(j,:)
+      end if
     end do
   end do
 end function scrni
@@ -180,18 +192,19 @@ function get_norb(ne)
 end function get_norb
 
 !
-! Get the orbital occupancy and quantum numbers by the number
+! Get the orbital occupancy and quantum numbers by the number of
 ! electrons
 !
 subroutine get_occ(ne, norb, nnum, lnum, nocc)
   integer(ik) :: ne, norb, nnum(norb), lnum(norb), nocc(norb)
   !
-  integer(ik) :: i, l, nin, maxocc, nl
+  integer(ik) :: i, j, l, nin, maxocc, nl, tmpn, tmpl, tmpo
 
   nl = 0
   i = 0
   maxocc = 0
-  do
+  ! scan through increasing n+l starting from the highest l value
+  do while (maxocc < ne)
     nl = nl + 1
     do l = (nl - 1)/2,0,-1
       i = i + 1
@@ -201,11 +214,31 @@ subroutine get_occ(ne, norb, nnum, lnum, nocc)
       lnum(i) = l
       if (maxocc >= ne) then
         nocc(i) = nin + ne - maxocc
-        return
+        exit
       else
         nocc(i) = nin
       end if
     end do
+  end do
+  ! sort the orbitals by n
+  do i = 2,norb
+    if (nnum(i) < nnum(i-1)) then
+      tmpn = nnum(i)
+      tmpl = lnum(i)
+      tmpo = nocc(i)
+      do j = i-1,2,-1
+        if (nnum(j) == tmpn) then
+          nnum(j+1) = tmpn
+          lnum(j+1) = tmpl
+          nocc(j+1) = tmpo
+          exit
+        else
+          nnum(j+1) = nnum(j)
+          lnum(j+1) = lnum(j)
+          nocc(j+1) = nocc(j)
+        end if
+      end do
+    end if
   end do
 end subroutine get_occ
 
