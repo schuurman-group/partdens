@@ -2,7 +2,7 @@ CC  = gcc -Wall -m64 -march=k8 -msse3 -mfpmath=sse -O3
 #F90 = ifort -warn -nofor_main -ipo -O3 -no-prec-div -static -openmp -assume cc_omp -complex_limited_range \
             -debug extended -traceback
 F90 = ifort -warn -nofor_main -ipo -O3 -no-prec-div -openmp -assume cc_omp -complex_limited_range \
-            -debug extended -traceback 
+            -debug extended -traceback
 F90L = $(F90)
 #LAPACK = -L /usr/local/intel/icte/3.1.1/mkl/10.0.3.020/lib/em64t -lmkl_lapack -lmkl_em64t -lguide -lpthread
 #LAPACK = -L /usr/local/intel/ics/2013.0.028/mkl/lib/intel64 -lmkl_lapack -lmkl_em64t -lguide -lpthread 
