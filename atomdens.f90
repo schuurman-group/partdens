@@ -4,6 +4,8 @@
 !
 module atomdens
   use accuracy
+  use atoms
+  use math
 
 contains
 
@@ -32,7 +34,7 @@ subroutine psi_integ(r, nr, Z, chg, norb, niter, thrsh, psi)
   real(ark)   :: psi(norb,nr)
   !
   integer(ik) :: i, j, ne, nnum(norb), lnum(norb), nocc(norb)
-  real(rk)    :: dr, selfsc, norm, cj, zeff(nr)
+  real(rk)    :: dr, norm, cj, zeff(nr)
   real(rk)    :: last(nr), resid(nr), fr(nr), scr(norb, nr), sfac(norb, nr)
 
   ne = Z - chg
@@ -140,6 +142,7 @@ end function r_nl
 
 !
 ! Get r-dependent screening parameters using Slater's rules
+! See Slater, J. C. Phys. Rev. 1930, 36, 57-64.
 !
 function scrni(nocc, nnum, lnum, norb, scr, nr)
   integer(ik) :: norb, nr, nnum(norb), lnum(norb), nocc(norb)
@@ -256,5 +259,24 @@ function cumsum(arr, nx)
     cumsum(i) = arr(i) + cumsum(i-1)
   end do
 end function cumsum
+
+!
+! Return a radial grid with weights
+!
+function rlegendre(nrad, Z)
+    integer(ik)  :: nrad, Z
+    real(rk)     :: rlegendre(2,nrad)
+    !
+    character(2) :: atype
+    real(rk)     :: r(nrad), w(nrad), rat
+
+    call MathGetQuadrature('Legendre', nrad, r, w)
+    atype = AtomElementSymbol(Z*1.0_rk)
+    rat = AtomCovalentR(atype)
+    ! map from (-1, 1) to (0, ...)
+    rlegendre(1,:) = rat * (1 + r) / (1 - r)
+    ! scale weights appropriately
+    rlegendre(2,:) = 8.0_rk * pi * w * rat * (r / (1 - r))**2
+end function rlegendre
 
 end module atomdens

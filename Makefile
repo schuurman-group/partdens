@@ -1,5 +1,5 @@
 goal: makefile.dep
-	make vddi.x
+	make ddcharge.x
 
 MAKEFLAGS = -r
 
@@ -54,13 +54,13 @@ LIBFC += atoms.o
 LIBFC += lebedev.o
 LIBFC += molecular_grid.o
 LIBFC += atomdens.o
-LIBFC += vddi.o
+LIBFC += ddcharge.o
 
 #
 # Building the binaries
 #
-vddi.x: vddi.o $(LIBFC)
-	$(F90) -o vddi.x vddi.o $(LIBFC) $(LIBS)
+ddcharge.x: ddcharge.o $(LIBFC)
+	$(F90) -o ddcharge.x ddcharge.o $(LIBFC) $(LIBS)
 
 #
 # Automatically-generated dependencies
