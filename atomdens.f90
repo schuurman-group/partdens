@@ -13,28 +13,29 @@ contains
 ! Build the electron density from the sum of the squares of
 ! the atomic wavefunction
 !
-subroutine psisq(r, nr, Z, chg, norb, niter, thrsh, psi2)
+subroutine psisq(r, wr, nr, Z, chg, norb, niter, thrsh, psi2)
   integer(ik) :: nr, Z, chg, norb, niter
-  real(rk)    :: thrsh, r(nr)
+  real(rk)    :: thrsh, r(nr), wr(nr)
   real(ark)   :: psi2(nr)
   !
   real(ark)   :: psi(norb, nr)
 
-  call psi_integ(r, nr, Z, chg, norb, niter, thrsh, psi)
+  call psi_integ(r, wr, nr, Z, chg, norb, niter, thrsh, psi)
   psi2 = sum(psi**2, dim=1)
 end subroutine psisq
 
 !
 ! Build the components of an atomic wavefunction using the integrated
 ! Slater's rules for screening S_n(r)
+! In a trivial even-spaced grid, weights are wr = dr*r^2
 !
-subroutine psi_integ(r, nr, Z, chg, norb, niter, thrsh, psi)
+subroutine psi_integ(r, wr, nr, Z, chg, norb, niter, thrsh, psi)
   integer(ik) :: nr, Z, chg, norb, niter
-  real(rk)    :: thrsh, r(nr)
+  real(rk)    :: thrsh, r(nr), wr(nr)
   real(ark)   :: psi(norb,nr)
   !
   integer(ik) :: i, j, ne, nnum(norb), lnum(norb), nocc(norb)
-  real(rk)    :: dr, norm, cj, zeff(nr)
+  real(rk)    :: norm, cj, zeff(nr)
   real(rk)    :: last(nr), resid(nr), fr(nr), scr(norb, nr), sfac(norb, nr)
 
   ne = Z - chg
@@ -43,14 +44,13 @@ subroutine psi_integ(r, nr, Z, chg, norb, niter, thrsh, psi)
     return
   end if
   call get_occ(ne, norb, nnum, lnum, nocc)
-  dr = r(2) - r(1)
   ! initial guess
   call psi_slater(r, nr, Z, chg, norb, psi)
-  last = r**2*sum(psi**2, dim=1)
+  last = wr*sum(psi**2, dim=1)
   do i = 1,niter
     ! set up integrated screening factor
     do j = 1,norb
-      scr(j,:) = cumsum(r**2*psi(j,:)**2, nr)*dr / nocc(j)
+      scr(j,:) = cumsum(wr*psi(j,:)**2, nr) / nocc(j)
     end do
     sfac = scrni(nocc, nnum, lnum, norb, scr, nr)
     do j = 1,norb
@@ -58,17 +58,17 @@ subroutine psi_integ(r, nr, Z, chg, norb, niter, thrsh, psi)
       zeff = Z - sfac(j,:)
       ! find the single electron contribution and renormalize
       fr = r_nl(r, nr, zeff, nnum(j), lnum(j))
-      norm = sum(r**2*fr**2)*dr
+      norm = sum(wr*fr**2)
       cj = sqrt(nocc(j) / norm)
       ! add renormalized component to psi
       psi(j,:) = cj*fr
     end do
     ! check for convergence
-    resid = abs(r**2*sum(psi**2, dim=1) - last)
+    resid = abs(wr*sum(psi**2, dim=1) - last)
     if (maxval(resid) < thrsh) then
       return
     end if
-    last = r**2*sum(psi**2, dim=1)
+    last = wr*sum(psi**2, dim=1)
   end do
 end subroutine psi_integ
 
@@ -246,6 +246,25 @@ subroutine get_occ(ne, norb, nnum, lnum, nocc)
 end subroutine get_occ
 
 !
+! Return a radial grid with weights
+!
+subroutine rlegendre(nrad, Z, rad, wgt)
+    integer(ik)  :: nrad, Z
+    real(rk)     :: rad(nrad), wgt(nrad)
+    !
+    character(2) :: atype
+    real(rk)     :: r(nrad), w(nrad), rat
+
+    call MathGetQuadrature('Legendre', nrad, r, w)
+    atype = AtomElementSymbol(Z*1.0_rk)
+    rat = AtomCovalentR(atype)
+    ! map from (-1, 1) to (0, ...)
+    rad = rat * (1 + r) / (1 - r)
+    ! scale weights appropriately
+    wgt = 8.0_rk * pi * w * rat * (r / (1 - r))**2
+end subroutine rlegendre
+
+!
 ! Return the cumulative sum of a 1D array
 !
 function cumsum(arr, nx)
@@ -259,24 +278,5 @@ function cumsum(arr, nx)
     cumsum(i) = arr(i) + cumsum(i-1)
   end do
 end function cumsum
-
-!
-! Return a radial grid with weights
-!
-function rlegendre(nrad, Z)
-    integer(ik)  :: nrad, Z
-    real(rk)     :: rlegendre(2,nrad)
-    !
-    character(2) :: atype
-    real(rk)     :: r(nrad), w(nrad), rat
-
-    call MathGetQuadrature('Legendre', nrad, r, w)
-    atype = AtomElementSymbol(Z*1.0_rk)
-    rat = AtomCovalentR(atype)
-    ! map from (-1, 1) to (0, ...)
-    rlegendre(1,:) = rat * (1 + r) / (1 - r)
-    ! scale weights appropriately
-    rlegendre(2,:) = 8.0_rk * pi * w * rat * (r / (1 - r))**2
-end function rlegendre
 
 end module atomdens

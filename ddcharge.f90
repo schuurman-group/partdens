@@ -1,5 +1,10 @@
 !
-!  The iterative Voronoi deformation density program
+!  The deformation density partial charge program
+!
+!  Calculates charges from a GAMESS RDM output file using the Voronoi
+!  deformation density or Hirshfeld algorithms, or their iterative
+!  solutions. Radial atomic densities are from a sperically averaged
+!  ab initio library or integrated Slater densities.
 !
 program vddi
     use accuracy
@@ -8,19 +13,18 @@ program vddi
     use molecular_grid
     use atomdens
     !
-    character(100)           :: rdm_file='rdm.dat'
+    character(100)           :: rdm_file="rdm.dat", atyp="abinitio", wtyp="hirshfeld"
     character(2),allocatable :: atypes(:)
-    integer(ik)              :: i, j, ib, ipt, iter, ios, npts
     integer(ik)              :: pfile, hfile, cfile, mfile, wfile
-    integer(ik)              :: rdm_count, natom, nbatch, nuniq
+    integer(ik)              :: i, j, ib, ipt, iter, npts
+    integer(ik)              :: rdm_count, natom, nbatch, nuniq, norb
     integer(ik)              :: nrad=70, nang=110, narad=70, maxiter=1
-    integer(ik),allocatable  :: aind(:), iwhr(:), qlist(:)
-    real(rk)                 :: tmp_rdm_sv(1000), thrsh=1e-2
+    integer(ik),allocatable  :: iwhr(:), qlist(:)
+    real(rk)                 :: norm, normatm, tmp_rdm_sv(1000), thrsh=1e-2
     real(rk),pointer         :: xyzw(:,:)
-    real(rk),allocatable     :: xyzq(:,:), ax(:,:), awgt(:,:)
-    real(rk),allocatable     :: norm(:), normatm(:), charge(:), dcharge(:)
-    real(ark),allocatable    :: aden(:,:)
-    real(ark),allocatable    :: rhomol(:), rhoatm(:), rdm_sv(:)
+    real(rk),allocatable     :: xyzq(:,:), ax(:,:), aw(:,:), awgt(:,:)
+    real(rk),allocatable     :: charge(:), dcharge(:)
+    real(ark),allocatable    :: aden(:,:), rhomol(:), rhopro(:), rhoatm(:,:), rdm_sv(:)
     type(gam_structure)      :: mol
     type(mol_grid)           :: den_grid
 
@@ -43,7 +47,6 @@ program vddi
     call gamess_load_orbitals(file=trim(rdm_file), structure=mol)
 
     allocate (atypes(mol%natoms), xyzq(4,mol%natoms), iwhr(mol%natoms))
-    allocate (norm(mol%natoms), normatm(mol%natoms))
     allocate (charge(mol%natoms), dcharge(mol%natoms))
 
     call gamess_report_nuclei(natom, xyzq, mol)
@@ -58,8 +61,8 @@ program vddi
     !
     !  Molecular density numerical integration loop
     !
-    open(mfile, file='moldens.dat', action='write', status='new', iostat=ios)
-    norm(:) = 0
+    open(mfile, file='moldens.dat', action='write', status='new')
+    norm = 0
     nullify(xyzw)
     mol_grid_batches: do ib = 1,nbatch
         !
@@ -93,45 +96,56 @@ program vddi
     !  Atomic density numerical integration loop
     !
     open(mfile, file='moldens.dat', action='read')
-    open(pfile, file='density.dat', action='write', status='new', iostat=ios)
-    rhoatm(:) = 0
+    open(pfile, file='density.dat', action='write', status='new')
+    open(wfile, file='weights.dat', action='write', status='new')
     charge(:) = 0
     iterate_chg: do iter = 1,maxiter
-        !
-        !  Evaluate the atomic densities for interpolation
-        !
         rewind mfile
-        ! the two files below are temporary, for tests.
-        open(hfile, file='/home/rymac/Projects/PartialCharge/ddcharge/atomlib/hydrog')
-        open(cfile, file='/home/rymac/Projects/PartialCharge/ddcharge/atomlib/carbon')
-        call unique(int(xyzq(4,:)), natom, iwhr, nuniq)
-        allocate (qlist(nuniq))
-        qlist = unique_list(int(xyzq(4,:)), natom, iwhr, nuniq)
-        allocate (ax(nuniq,narad), aden(nuniq,narad), awgt(nuniq,narad))
-        setup_atom: do i = 1,nuniq
-        if (qlist(i) == 1) then
-            do j=1,narad
-              read(hfile,*) ax(i,j), aden(i,j), awgt(i,j)
-            end do
-        else if (qlist(i) == 6) then
-            do j=1,narad
-              read(cfile,*) ax(i,j), aden(i,j), awgt(i,j)
-            end do
-        end if
-        end do setup_atom
-        !setup_charge: do i = 1,natom
-        !  if (charge(i) < 0) then
-        !    psi2(i,:) = (1+charge(i))*psi2n(iwhr(i),:) - charge(i)*psi2m(iwhr(i),:)
-        !  else if (charge(i) > 0) then
-        !    psi2(i,:) = (1-charge(i))*psi2n(iwhr(i),:) + charge(i)*psi2p(iwhr(i),:)
-        !  else
-        !    psi2(i,:) = psi2n(iwhr(i),:)
-        !  end if
-        !end do setup_charge
         !
+        !  Set up the atomic densities for interpolation
+        !
+        call unique(int(xyzq(4,:)), natom, iwhr, nuniq)
+        allocate (qlist(nuniq), ax(nuniq,narad), aw(nuniq,narad), aden(nuniq,narad))
+        qlist = unique_list(int(xyzq(4,:)), natom, iwhr, nuniq)
+        select case (atyp)
+            case ("abinitio")
+                ! the two files below are temporary, for tests.
+                open(hfile, file='/home/rymac/Projects/PartialCharge/ddcharge/atomlib/hydrog')
+                open(cfile, file='/home/rymac/Projects/PartialCharge/ddcharge/atomlib/carbon')
+                setup_atom: do i = 1,nuniq
+                    if (qlist(i) == 1) then
+                        do j = 1,narad
+                          read(hfile,*) ax(i,j), aden(i,j), aw(i,j)
+                        end do
+                    else if (qlist(i) == 6) then
+                        do j = 1,narad
+                          read(cfile,*) ax(i,j), aden(i,j), aw(i,j)
+                        end do
+                    end if
+                end do setup_atom
+            case ("slater")
+                setup_charge: do i = 1,nuniq
+                    call rlegendre(narad, qlist(i), ax(i,:), aw(i,:))
+                    if (charge(i) < 0) then
+                        ! change this
+                        norb = get_norb(qlist(i))
+                        call psisq(ax(i,:), aw(i,:), narad, qlist(i), 0, norb, 50, 1e-6_rk, aden(i,:))
+                    else if (charge(i) > 0) then
+                        ! change this
+                        norb = get_norb(qlist(i))
+                        call psisq(ax(i,:), aw(i,:), narad, qlist(i), 0, norb, 50, 1e-6_rk, aden(i,:))
+                    else
+                        norb = get_norb(qlist(i))
+                        call psisq(ax(i,:), aw(i,:), narad, qlist(i), 0, norb, 50, 1e-6_rk, aden(i,:))
+                    end if
+                end do setup_charge
+            case default
+                write(out,"('atomic_dens: Error unrecognized type',s)") atyp
+                stop "atomic_dens - unrecognized type"
+        end select
         call GridPointsBatch(den_grid, 'Reset')
+        normatm    = 0
         dcharge(:) = 0
-        normatm(:) = 0
         nullify(xyzw)
         grid_batches: do ib = 1,nbatch
             !
@@ -139,52 +153,62 @@ program vddi
             !
             call GridPointsBatch(den_grid, 'Next batch', xyzw=xyzw)
             !
-            !  If the batch size changed, reallocate rhoatm() and aind()
+            !  If the batch size changed, reallocate density and weight arrays
             !
             npts = size(xyzw, dim=2)
-            if (allocated(rhoatm)) then
+            if (allocated(rhopro)) then
                 if (size(rhomol) /= npts) deallocate (rhomol)
-                if (size(rhoatm) /= npts) deallocate (rhoatm)
-                if (size(aind) /= npts) deallocate (aind)
+                if (size(rhopro) /= npts) deallocate (rhopro)
+                if (size(rhoatm,2) /= npts) deallocate (rhoatm)
+                if (size(awgt,2) /= npts) deallocate (awgt)
             end if
             if (.not. allocated(rhomol)) allocate (rhomol(npts))
-            if (.not. allocated(rhoatm)) allocate (rhoatm(npts))
-            if (.not. allocated(aind)) allocate (aind(npts))
+            if (.not. allocated(rhopro)) allocate (rhopro(npts))
+            if (.not. allocated(rhoatm)) allocate (rhoatm(natom,npts))
+            if (.not. allocated(awgt)) allocate (awgt(natom,npts))
             !
             !  Read in molecular densities from file
             !
-            do i=1,npts
-                read(mfile,*) rhomol(i)
-            end do
+            read_rho: do ipt = 1,npts
+                read(mfile,*) rhomol(ipt)
+            end do read_rho
             !
             !  Evaluate atomic densities at grid points
             !
-            call evaluate_atomic(aden, ax, narad, xyzq, iwhr, nuniq, natom, xyzw(1:3,:), npts, rhoatm)
+            call evaluate_atomic(aden, ax, narad, xyzq(1:3,:), iwhr, nuniq, natom, xyzw(1:3,:), npts, rhoatm)
+            rhopro = sum(rhoatm, dim=1)
             !
             !  Determine atomic assignments
             !
-            aind = assign_voronoi(xyzq(1:3,:), natom, xyzw(1:3,:), npts)
+            awgt = assign_atom(xyzq(1:3,:), natom, xyzw(1:3,:), npts, rhoatm, wtyp)
             !
             !  Integrate
             !
             integrate: do ipt = 1,npts
-                normatm(aind(ipt)) = normatm(aind(ipt)) + xyzw(4,ipt) * rhoatm(ipt)
-                dcharge(aind(ipt)) = dcharge(aind(ipt)) + xyzw(4,ipt) * (rhoatm(ipt)-rhomol(ipt))
-                !if (iter == maxiter) then
-                write(pfile,1000) xyzw(4,ipt), xyzw(1:3,ipt), rhoatm(ipt)-rhomol(ipt)
+                normatm = normatm + xyzw(4,ipt) * rhopro(ipt)
+                !if (iter == maxiter) then ! what is the smart way to save this information?
+                write(pfile,1000) xyzw(4,ipt), xyzw(1:3,ipt), rhopro(ipt)-rhomol(ipt)
+                write(wfile,'(*(e16.8))') awgt(:,ipt)
                 !end if
             end do integrate
+            !
+            !  Find the atomic contributions
+            !
+            atom_contrib: do i = 1,natom
+                dcharge(i) = dcharge(i) + sum(awgt(i,:) * xyzw(4,:) * (rhopro(:) - rhomol(:)))
+            end do atom_contrib
         end do grid_batches
         charge(:) = charge(:) + dcharge(:)
 
         print *,'ITER: ', iter
-        print *,'TOTAL ATOMIC DENSITY: ', sum(normatm)
+        print *,'TOTAL ATOMIC DENSITY: ', normatm
         print *,'TOTAL CHANGE IN CHARGE: ', sum(dcharge)
         print *,'CONTRIBUTIONS: ', dcharge
         print *,''
     end do iterate_chg
     close(pfile)
     close(mfile)
+    close(wfile)
     call GridDestroy(den_grid)
 
     print *,'FINAL CHARGES: ', charge
@@ -238,29 +262,14 @@ function unique_list(arr, narr, mask, nuniq)
 end function unique_list
 
 !
-!  Generate an equally spaced list of n elements between specified numbers
-!
-function linspace(first, last, n)
-  integer(ik) :: n
-  real(rk)    :: first, last, linspace(n)
-  !
-  integer(ik) :: i
-  real(rk)    :: step, list(n)
-
-  list = (/(i, i=0,n-1)/)
-  step = (last - first) / (n - 1)
-  linspace = list*step + first
-end function linspace
-
-!
 !  Determine the density at XYZ coordinates
 !
 subroutine evaluate_density(rdm_count, npt, mol, rdm_sv, xyz, rho)
     integer(ik),intent(in) :: rdm_count, npt
     type(gam_structure), intent(inout)   :: mol
     real(rk), intent(in)   :: rdm_sv(rdm_count)
-    real(rk), intent(in)   :: xyz(3,npt) ! XYZ coordinates of the grid points
-    real(rk), intent(out)  :: rho(npt)   ! Transition density at these grid points
+    real(rk), intent(in)   :: xyz(3,npt)
+    real(rk), intent(out)  :: rho(npt)
     !
     integer(ik)            :: ipt, ird, imo, nmo, nbas
     real(ark), allocatable :: basval(:,:,:)
@@ -294,26 +303,26 @@ subroutine evaluate_density(rdm_count, npt, mol, rdm_sv, xyz, rho)
 end subroutine evaluate_density
 
 !
-!  Determine the total atomic density at XYZ coordinates
+!  Determine the atomic density contributions at grid XYZ coordinates
 !
-subroutine evaluate_atomic(den, r, nr, xyzq, uind, nu, natm, xyz, npt, rho)
+subroutine evaluate_atomic(rden, r, nr, xyzc, uind, nu, natm, xyz, npt, rho)
     integer(ik) :: nr, natm, npt, nu, uind(natm)
-    real(rk)    :: r(nu,nr), xyzq(4,natm), xyz(3,npt)
-    real(ark)   :: den(nu,nr), rho(npt)
+    real(rk)    :: r(nu,nr), xyzc(3,natm), xyz(3,npt)
+    real(ark)   :: rden(nu,nr), rho(natm,npt)
     !
     integer(ik) :: iatm, ipt, ui
     real(rk)    :: ratm
 
-    rho(:) = 0
+    rho(:,:) = 0
     evaluate_atom: do iatm = 1,natm
         ui = uind(iatm)
         interp_point: do ipt = 1,npt
-            ratm = sqrt((xyz(1,ipt)-xyzq(1,iatm))**2 + &
-                        (xyz(2,ipt)-xyzq(2,iatm))**2 + &
-                        (xyz(3,ipt)-xyzq(3,iatm))**2)
+            ratm = sqrt((xyz(1,ipt)-xyzc(1,iatm))**2 + &
+                        (xyz(2,ipt)-xyzc(2,iatm))**2 + &
+                        (xyz(3,ipt)-xyzc(3,iatm))**2)
             ! atomic density = 0 outside the grid
             if (ratm < r(ui,nr)) then
-                rho(ipt) = rho(ipt) + interp(ratm, r(ui,:), den(ui,:), nr, "exp", 8)
+                rho(iatm,ipt) = rho(iatm,ipt) + interp(ratm, r(ui,:), rden(ui,:), nr, "exp", 8)
             end if
         end do interp_point
     end do evaluate_atom
@@ -329,7 +338,7 @@ function interp(xpt, x, fx, nx, ityp, ordr)
     real(rk)     :: xpt, x(nx)
     real(ark)    :: fx(nx), interp
     !
-    integer(ik)  :: i, j, ix, ind, n(ordr+1)
+    integer(ik)  :: i, ix, ind, n(ordr+1)
 
     ! find the nearest index
     find_ind: do ix = 2,nx
@@ -370,7 +379,7 @@ function interp(xpt, x, fx, nx, ityp, ordr)
             end do
         case default
             write (out,"('interp: Error unrecognized type ',s)") ityp
-            stop 'interp - unrecognized type'
+            stop "interp - unrecognized type"
     end select
 end function interp
 
@@ -393,24 +402,44 @@ end function x_li
 !
 !  Determine the Voronoi cell assignment for a grid
 !
-function assign_voronoi(xyzatm, natm, xyz, npt)
-    integer(ik) :: natm, npt, assign_voronoi(npt)
-    real(rk)    :: xyzatm(3,natm), xyz(3,npt)
+function assign_atom(xyzatm, natm, xyz, npt, rho, wtyp)
+    character(*) :: wtyp
+    integer(ik)  :: natm, npt
+    real(rk)     :: xyzatm(3,natm), xyz(3,npt), rho(natm,npt)
+    real(rk)     :: assign_atom(natm,npt)
     !
-    integer(ik) :: ipt, iatm
-    real(rk)    :: dist(natm)
+    integer(ik)  :: ipt, imin, iatm
+    real(rk)     :: dist(natm), rhotot(npt)
 
-    assign_point: do ipt = 1,npt
-        dist = sqrt((xyz(1,ipt)-xyzatm(1,:))**2 + &
-                    (xyz(2,ipt)-xyzatm(2,:))**2 + &
-                    (xyz(3,ipt)-xyzatm(3,:))**2)
-        assign_voronoi(ipt) = 1
-        find_min: do iatm = 2,natm
-            if (dist(iatm) < dist(assign_voronoi(ipt))) then
-                assign_voronoi(ipt) = iatm
-            end if
-        end do find_min
-    end do assign_point
-end function assign_voronoi
+    select case (wtyp)
+        case ("voronoi")
+            assign_atom(:,:) = 0
+            do ipt = 1,npt
+                dist = sqrt((xyz(1,ipt)-xyzatm(1,:))**2 + &
+                            (xyz(2,ipt)-xyzatm(2,:))**2 + &
+                            (xyz(3,ipt)-xyzatm(3,:))**2)
+                imin = 1
+                find_min: do iatm = 2,natm
+                    if (dist(iatm) < dist(imin)) then
+                        imin = iatm
+                    end if
+                end do find_min
+                assign_atom(imin,ipt) = 1.
+            end do
+        case ("hirshfeld")
+            rhotot = sum(rho, dim=1)
+            assign_atom(:,:) = 0
+            do ipt = 1,npt
+                if (rhotot(ipt) > 0) then
+                    do iatm = 1,natm
+                        assign_atom(iatm,ipt) = rho(iatm,ipt) / rhotot(ipt)
+                    end do
+                end if
+            end do
+        case default
+            write(out,"('assign_atom: Error unrecognized type',s)") wtyp
+            stop "assign_atom - unrecognized type"
+    end select
+end function assign_atom
 
 end program vddi
