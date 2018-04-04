@@ -18,13 +18,14 @@ program vddi
     integer(ik)              :: pfile, hfile, cfile, mfile, wfile
     integer(ik)              :: i, j, ib, ipt, iter, npts
     integer(ik)              :: rdm_count, natom, nbatch, nuniq, norb
-    integer(ik)              :: nrad=70, nang=110, narad=70, maxiter=1
+    integer(ik)              :: nrad=70, nang=110, narad=70, maxiter=11
     integer(ik),allocatable  :: iwhr(:), qlist(:)
     real(rk)                 :: norm, normatm, tmp_rdm_sv(1000), thrsh=1e-2
     real(rk),pointer         :: xyzw(:,:)
     real(rk),allocatable     :: xyzq(:,:), ax(:,:), aw(:,:), awgt(:,:)
     real(rk),allocatable     :: charge(:), dcharge(:)
-    real(ark),allocatable    :: aden(:,:), rhomol(:), rhopro(:), rhoatm(:,:), rdm_sv(:)
+    real(ark),allocatable    :: aden(:,:), acden(:,:,:)
+    real(ark),allocatable    :: rhomol(:), rhopro(:), rhoatm(:,:), rdm_sv(:)
     type(gam_structure)      :: mol
     type(mol_grid)           :: den_grid
 
@@ -93,6 +94,71 @@ program vddi
     print *,'TOTAL MOLECULAR DENSITY: ', norm
 
     !
+    !  Import spherically averaged densities
+    !
+    call unique(int(xyzq(4,:)), natom, iwhr, nuniq)
+    allocate (qlist(nuniq), ax(nuniq,narad), aw(nuniq,narad))
+    allocate (acden(5,nuniq,narad), aden(natom,narad))
+    qlist = unique_list(int(xyzq(4,:)), natom, iwhr, nuniq)
+    select case (atyp)
+        case ("abinitio")
+            !open(lfile, "/home/rymac/Projects/PartialCharge/ddcharge/atomlib/" // alib)
+            ! everything in this section is temporary, need better import
+            open(hfile, file='/home/rymac/Projects/PartialCharge/ddcharge/atomlib/hydrog')
+            open(cfile, file='/home/rymac/Projects/PartialCharge/ddcharge/atomlib/carbon')
+            import_abinit: do i = 1,nuniq
+                if (qlist(i) == 1) then
+                    do j = 1,narad
+                      read(hfile,*) ax(i,j), acden(1,i,j), aw(i,j)
+                    end do
+                    do j = 1,narad
+                      read(hfile,*) ax(i,j), acden(2,i,j), aw(i,j)
+                    end do
+                    do j = 1,narad
+                      read(hfile,*) ax(i,j), acden(3,i,j), aw(i,j)
+                    end do
+                else if (qlist(i) == 6) then
+                    do j = 1,narad
+                      read(cfile,*) ax(i,j), acden(1,i,j), aw(i,j)
+                    end do
+                    do j = 1,narad
+                      read(cfile,*) ax(i,j), acden(2,i,j), aw(i,j)
+                    end do
+                    do j = 1,narad
+                      read(cfile,*) ax(i,j), acden(3,i,j), aw(i,j)
+                    end do
+                    do j = 1,narad
+                      read(cfile,*) ax(i,j), acden(4,i,j), aw(i,j)
+                    end do
+                    do j = 1,narad
+                      read(cfile,*) ax(i,j), acden(5,i,j), aw(i,j)
+                    end do
+                end if
+            end do import_abinit
+            close(hfile)
+            close(cfile)
+        case ("slater")
+            import_slater: do i = 1,nuniq
+                call rlegendre(narad, qlist(i), ax(i,:), aw(i,:))
+                if (charge(i) < 0) then
+                    ! change this to include anion contributions
+                    norb = get_norb(qlist(i))
+                    call psisq(ax(i,:), aw(i,:), narad, qlist(i), 0, norb, 50, 1e-6_rk, aden(i,:))
+                else if (charge(i) > 0) then
+                    ! change this to include cation contributions
+                    norb = get_norb(qlist(i))
+                    call psisq(ax(i,:), aw(i,:), narad, qlist(i), 0, norb, 50, 1e-6_rk, aden(i,:))
+                else
+                    norb = get_norb(qlist(i))
+                    call psisq(ax(i,:), aw(i,:), narad, qlist(i), 0, norb, 50, 1e-6_rk, aden(i,:))
+                end if
+            end do import_slater
+        case default
+            write(out,"('atomic_dens: Error unrecognized type',s)") atyp
+            stop "atomic_dens - unrecognized type"
+    end select
+
+    !
     !  Atomic density numerical integration loop
     !
     open(mfile, file='moldens.dat', action='read')
@@ -102,47 +168,24 @@ program vddi
     iterate_chg: do iter = 1,maxiter
         rewind mfile
         !
-        !  Set up the atomic densities for interpolation
+        !  Set up the radial atomic densities
         !
-        call unique(int(xyzq(4,:)), natom, iwhr, nuniq)
-        allocate (qlist(nuniq), ax(nuniq,narad), aw(nuniq,narad), aden(nuniq,narad))
-        qlist = unique_list(int(xyzq(4,:)), natom, iwhr, nuniq)
-        select case (atyp)
-            case ("abinitio")
-                ! the two files below are temporary, for tests.
-                open(hfile, file='/home/rymac/Projects/PartialCharge/ddcharge/atomlib/hydrog')
-                open(cfile, file='/home/rymac/Projects/PartialCharge/ddcharge/atomlib/carbon')
-                setup_atom: do i = 1,nuniq
-                    if (qlist(i) == 1) then
-                        do j = 1,narad
-                          read(hfile,*) ax(i,j), aden(i,j), aw(i,j)
-                        end do
-                    else if (qlist(i) == 6) then
-                        do j = 1,narad
-                          read(cfile,*) ax(i,j), aden(i,j), aw(i,j)
-                        end do
-                    end if
-                end do setup_atom
-            case ("slater")
-                setup_charge: do i = 1,nuniq
-                    call rlegendre(narad, qlist(i), ax(i,:), aw(i,:))
-                    if (charge(i) < 0) then
-                        ! change this
-                        norb = get_norb(qlist(i))
-                        call psisq(ax(i,:), aw(i,:), narad, qlist(i), 0, norb, 50, 1e-6_rk, aden(i,:))
-                    else if (charge(i) > 0) then
-                        ! change this
-                        norb = get_norb(qlist(i))
-                        call psisq(ax(i,:), aw(i,:), narad, qlist(i), 0, norb, 50, 1e-6_rk, aden(i,:))
-                    else
-                        norb = get_norb(qlist(i))
-                        call psisq(ax(i,:), aw(i,:), narad, qlist(i), 0, norb, 50, 1e-6_rk, aden(i,:))
-                    end if
-                end do setup_charge
-            case default
-                write(out,"('atomic_dens: Error unrecognized type',s)") atyp
-                stop "atomic_dens - unrecognized type"
-        end select
+        setup_atom: do i = 1,natom
+            if (abs(charge(i)) > 2) then
+                write(out,"('setup_atom: Error |q',d,'| > 2')") i
+                stop "setup_atom - charge greater than 2"
+            else if (charge(i) < -1) then
+                aden(i,:) = (2 + charge(i))*acden(2,iwhr(i),:) - (1 + charge(i))*acden(4,iwhr(i),:)
+            else if (charge(i) > +1) then
+                aden(i,:) = (2 - charge(i))*acden(3,iwhr(i),:) + (charge(i) - 1)*acden(5,iwhr(i),:)
+            else if (charge(i) < 0) then
+                aden(i,:) = (1 + charge(i))*acden(1,iwhr(i),:) - charge(i)*acden(2,iwhr(i),:)
+            else if (charge(i) > 0) then
+                aden(i,:) = (1 - charge(i))*acden(1,iwhr(i),:) + charge(i)*acden(3,iwhr(i),:)
+            else
+                aden(i,:) = acden(1,iwhr(i),:)
+            end if
+        end do setup_atom
         call GridPointsBatch(den_grid, 'Reset')
         normatm    = 0
         dcharge(:) = 0
@@ -186,7 +229,7 @@ program vddi
             !
             integrate: do ipt = 1,npts
                 normatm = normatm + xyzw(4,ipt) * rhopro(ipt)
-                !if (iter == maxiter) then ! what is the smart way to save this information?
+                !if (iter == maxiter) then ! Only want this saved for the last iteration?
                 write(pfile,1000) xyzw(4,ipt), xyzw(1:3,ipt), rhopro(ipt)-rhomol(ipt)
                 write(wfile,'(*(e16.8))') awgt(:,ipt)
                 !end if
@@ -308,7 +351,7 @@ end subroutine evaluate_density
 subroutine evaluate_atomic(rden, r, nr, xyzc, uind, nu, natm, xyz, npt, rho)
     integer(ik) :: nr, natm, npt, nu, uind(natm)
     real(rk)    :: r(nu,nr), xyzc(3,natm), xyz(3,npt)
-    real(ark)   :: rden(nu,nr), rho(natm,npt)
+    real(ark)   :: rden(natm,nr), rho(natm,npt)
     !
     integer(ik) :: iatm, ipt, ui
     real(rk)    :: ratm
@@ -322,7 +365,7 @@ subroutine evaluate_atomic(rden, r, nr, xyzc, uind, nu, natm, xyz, npt, rho)
                         (xyz(3,ipt)-xyzc(3,iatm))**2)
             ! atomic density = 0 outside the grid
             if (ratm < r(ui,nr)) then
-                rho(iatm,ipt) = rho(iatm,ipt) + interp(ratm, r(ui,:), rden(ui,:), nr, "exp", 8)
+                rho(iatm,ipt) = rho(iatm,ipt) + interp(ratm, r(ui,:), rden(iatm,:), nr, "exp", 8)
             end if
         end do interp_point
     end do evaluate_atom
