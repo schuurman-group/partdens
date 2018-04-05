@@ -13,15 +13,15 @@ program vddi
     use molecular_grid
     use atomdens
     !
-    character(100)           :: rdm_file="rdm.dat", atyp="abinitio", wtyp="hirshfeld"
+    character(100)           :: rdm_file="rdm.dat", atyp="slater", alib="scf.cc-pvdz",  wtyp="hirshfeld", ityp="exp"
     character(2),allocatable :: atypes(:)
     integer(ik)              :: pfile, hfile, cfile, mfile, wfile
     integer(ik)              :: i, j, ib, ipt, iter, npts
     integer(ik)              :: rdm_count, natom, nbatch, nuniq, norb
-    integer(ik)              :: nrad=70, nang=110, narad=70, maxiter=11
+    integer(ik)              :: nrad=70, nang=110, narad=70, maxiter=40, iordr=8
     integer(ik),allocatable  :: iwhr(:), qlist(:)
-    real(rk)                 :: norm, normatm, tmp_rdm_sv(1000), thrsh=1e-2
-    real(rk),pointer         :: xyzw(:,:)
+    real(rk)                 :: norm, normatm, tmp_rdm_sv(1000), thrsh=1e-3
+    real(rk),pointer         :: xyzw(:,:), xyz(:,:)
     real(rk),allocatable     :: xyzq(:,:), ax(:,:), aw(:,:), awgt(:,:)
     real(rk),allocatable     :: charge(:), dcharge(:)
     real(ark),allocatable    :: aden(:,:), acden(:,:,:)
@@ -70,6 +70,7 @@ program vddi
         !  Get grid points
         !
         call GridPointsBatch(den_grid, 'Next batch', xyzw=xyzw)
+        xyz => xyzw(1:3,:)
         !
         !  If the batch size changed, reallocate rho()
         !
@@ -81,7 +82,7 @@ program vddi
         !
         !  Evaluate density at grid points
         !
-        call evaluate_density(rdm_count, npts, mol, rdm_sv, xyzw(1:3,:), rhomol)
+        call evaluate_density(rdm_count, npts, mol, rdm_sv, xyz, rhomol)
         !
         !  Integrate and save
         !
@@ -98,7 +99,7 @@ program vddi
     !
     call unique(int(xyzq(4,:)), natom, iwhr, nuniq)
     allocate (qlist(nuniq), ax(nuniq,narad), aw(nuniq,narad))
-    allocate (acden(5,nuniq,narad), aden(natom,narad))
+    allocate (acden(7,nuniq,narad), aden(natom,narad))
     qlist = unique_list(int(xyzq(4,:)), natom, iwhr, nuniq)
     select case (atyp)
         case ("abinitio")
@@ -139,19 +140,22 @@ program vddi
             close(cfile)
         case ("slater")
             import_slater: do i = 1,nuniq
+                ! these don't work at the moment
                 call rlegendre(narad, qlist(i), ax(i,:), aw(i,:))
-                if (charge(i) < 0) then
-                    ! change this to include anion contributions
-                    norb = get_norb(qlist(i))
-                    call psisq(ax(i,:), aw(i,:), narad, qlist(i), 0, norb, 50, 1e-6_rk, aden(i,:))
-                else if (charge(i) > 0) then
-                    ! change this to include cation contributions
-                    norb = get_norb(qlist(i))
-                    call psisq(ax(i,:), aw(i,:), narad, qlist(i), 0, norb, 50, 1e-6_rk, aden(i,:))
-                else
-                    norb = get_norb(qlist(i))
-                    call psisq(ax(i,:), aw(i,:), narad, qlist(i), 0, norb, 50, 1e-6_rk, aden(i,:))
-                end if
+                norb = get_norb(qlist(i))
+                call psisq(ax(i,:), aw(i,:), narad, qlist(i),  0, norb, 50, 1e-6_rk, acden(1,i,:))
+                norb = get_norb(qlist(i)+1)
+                call psisq(ax(i,:), aw(i,:), narad, qlist(i), -1, norb, 50, 1e-6_rk, acden(2,i,:))
+                norb = get_norb(qlist(i)-1)
+                call psisq(ax(i,:), aw(i,:), narad, qlist(i), +1, norb, 50, 1e-6_rk, acden(3,i,:))
+                norb = get_norb(qlist(i)+2)
+                call psisq(ax(i,:), aw(i,:), narad, qlist(i), -2, norb, 50, 1e-6_rk, acden(4,i,:))
+                norb = get_norb(qlist(i)-2)
+                call psisq(ax(i,:), aw(i,:), narad, qlist(i), +2, norb, 50, 1e-6_rk, acden(5,i,:))
+                norb = get_norb(qlist(i)+3)
+                call psisq(ax(i,:), aw(i,:), narad, qlist(i), -3, norb, 50, 1e-6_rk, acden(6,i,:))
+                norb = get_norb(qlist(i)-3)
+                call psisq(ax(i,:), aw(i,:), narad, qlist(i), +3, norb, 50, 1e-6_rk, acden(7,i,:))
             end do import_slater
         case default
             write(out,"('atomic_dens: Error unrecognized type',s)") atyp
@@ -218,7 +222,7 @@ program vddi
             !
             !  Evaluate atomic densities at grid points
             !
-            call evaluate_atomic(aden, ax, narad, xyzq(1:3,:), iwhr, nuniq, natom, xyzw(1:3,:), npts, rhoatm)
+            call evaluate_atomic(aden, ax, narad, xyzq(1:3,:), iwhr, nuniq, natom, ityp, iordr, xyzw(1:3,:), npts, rhoatm)
             rhopro = sum(rhoatm, dim=1)
             !
             !  Determine atomic assignments
@@ -248,13 +252,23 @@ program vddi
         print *,'TOTAL CHANGE IN CHARGE: ', sum(dcharge)
         print *,'CONTRIBUTIONS: ', dcharge
         print *,''
+
+        if (maxval(abs(dcharge)) < thrsh) then
+            print *,"CHARGES CONVERGED ON ITER ", iter
+            print *,"FINAL CHARGES: ", charge
+            exit
+        else if (iter == maxiter) then
+            print *,"CHARGES NOT CONVERGED FOR MAXITER"
+            print *,"UNCONVERGED CHARGES: ", charge
+        end if
     end do iterate_chg
+    !
+    !  Clean up
+    !
     close(pfile)
     close(mfile)
     close(wfile)
     call GridDestroy(den_grid)
-
-    print *,'FINAL CHARGES: ', charge
 
     1000 format(e24.8,f16.8,f16.8,f16.8,es18.10)
 
@@ -348,13 +362,14 @@ end subroutine evaluate_density
 !
 !  Determine the atomic density contributions at grid XYZ coordinates
 !
-subroutine evaluate_atomic(rden, r, nr, xyzc, uind, nu, natm, xyz, npt, rho)
-    integer(ik) :: nr, natm, npt, nu, uind(natm)
-    real(rk)    :: r(nu,nr), xyzc(3,natm), xyz(3,npt)
-    real(ark)   :: rden(natm,nr), rho(natm,npt)
+subroutine evaluate_atomic(rden, r, nr, xyzc, uind, nu, natm, ityp, iord, xyz, npt, rho)
+    character(3) :: ityp
+    integer(ik)  :: nr, natm, npt, nu, uind(natm), iord
+    real(rk)     :: r(nu,nr), xyzc(3,natm), xyz(3,npt)
+    real(ark)    :: rden(natm,nr), rho(natm,npt)
     !
-    integer(ik) :: iatm, ipt, ui
-    real(rk)    :: ratm
+    integer(ik)  :: iatm, ipt, ui
+    real(rk)     :: ratm
 
     rho(:,:) = 0
     evaluate_atom: do iatm = 1,natm
@@ -365,7 +380,7 @@ subroutine evaluate_atomic(rden, r, nr, xyzc, uind, nu, natm, xyz, npt, rho)
                         (xyz(3,ipt)-xyzc(3,iatm))**2)
             ! atomic density = 0 outside the grid
             if (ratm < r(ui,nr)) then
-                rho(iatm,ipt) = rho(iatm,ipt) + interp(ratm, r(ui,:), rden(iatm,:), nr, "exp", 8)
+                rho(iatm,ipt) = rho(iatm,ipt) + interp(ratm, r(ui,:), rden(iatm,:), nr, ityp, iord)
             end if
         end do interp_point
     end do evaluate_atom
@@ -373,77 +388,7 @@ subroutine evaluate_atomic(rden, r, nr, xyzc, uind, nu, natm, xyz, npt, rho)
 end subroutine evaluate_atomic
 
 !
-!  Interpolate a point on a function f(x)
-!
-function interp(xpt, x, fx, nx, ityp, ordr)
-    character(3) :: ityp
-    integer(ik)  :: nx, ordr
-    real(rk)     :: xpt, x(nx)
-    real(ark)    :: fx(nx), interp
-    !
-    integer(ik)  :: i, ix, ind, n(ordr+1)
-
-    ! find the nearest index
-    find_ind: do ix = 2,nx
-        if (xpt < x(ix) .or. ix == nx) then
-            ind = ix - 1
-            exit
-        end if
-    end do find_ind
-    ! get the range of indices for interpolation
-    if (ind < ordr/2 + 1) then
-        n = (/(i, i = 1,ordr+1)/)
-    else if (ind+ordr/2+mod(ordr,2) > nx) then
-        n = (/(i, i = nx-ordr,nx)/)
-    else
-        n = (/(i, i = ind-ordr/2,ind+ordr/2+mod(ordr,2))/)
-    end if
-    select case (ityp)
-        case ("pol")
-            ! polynomial interpolation
-            interp = 0.
-            do i = 1,ordr+1
-                ! don't bother adding zeros
-                if (fx(n(i)) /= 0) then
-                    interp = interp + fx(n(i))*x_li(xpt, x, nx, i, n, ordr)
-                end if
-            end do
-        case ("exp")
-            ! exponential interpolation
-            interp = 1.
-            do i = 1,ordr+1
-                ! a f(x) value of 0 kills the interpolation
-                if (fx(n(i)) == 0) then
-                    interp = 0
-                    return
-                else
-                    interp = interp * fx(n(i))**x_li(xpt, x, nx, i, n, ordr)
-                end if
-            end do
-        case default
-            write (out,"('interp: Error unrecognized type ',s)") ityp
-            stop "interp - unrecognized type"
-    end select
-end function interp
-
-!
-!  Find the x weighting factor for interpolation
-!
-function x_li(xpt, x, nx, i, n, ordr)
-    integer(ik) :: i, ordr, nx, n(ordr+1)
-    real(rk)    :: xpt, x(nx), x_li
-    !
-    integer(ik) :: j
-    x_li = 1.
-    do j = 1,ordr+1
-        if (j /= i) then
-            x_li = x_li * (xpt - x(n(j))) / (x(n(i)) - x(n(j)))
-        end if
-    end do
-end function x_li
-
-!
-!  Determine the Voronoi cell assignment for a grid
+!  Determine the atomic weight factors on a grid
 !
 function assign_atom(xyzatm, natm, xyz, npt, rho, wtyp)
     character(*) :: wtyp

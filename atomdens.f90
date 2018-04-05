@@ -27,12 +27,12 @@ end subroutine psisq
 !
 ! Build the components of an atomic wavefunction using the integrated
 ! Slater's rules for screening S_n(r)
-! In a trivial even-spaced grid, weights are wr = dr*r^2
+! In a trivial even-spaced grid, weights are wr = dr*4*pi*r^2
 !
 subroutine psi_integ(r, wr, nr, Z, chg, norb, niter, thrsh, psi)
   integer(ik) :: nr, Z, chg, norb, niter
   real(rk)    :: thrsh, r(nr), wr(nr)
-  real(ark)   :: psi(norb,nr)
+  real(ark)   :: psi(norb,nr), wpsi2j(nr)
   !
   integer(ik) :: i, j, ne, nnum(norb), lnum(norb), nocc(norb)
   real(rk)    :: norm, cj, zeff(nr)
@@ -50,7 +50,8 @@ subroutine psi_integ(r, wr, nr, Z, chg, norb, niter, thrsh, psi)
   do i = 1,niter
     ! set up integrated screening factor
     do j = 1,norb
-      scr(j,:) = cumsum(wr*psi(j,:)**2, nr) / nocc(j)
+      wpsi2j = wr*psi(j,:)**2
+      scr(j,:) = cumsum(wpsi2j, nr) / nocc(j)
     end do
     sfac = scrni(nocc, nnum, lnum, norb, scr, nr)
     do j = 1,norb
@@ -135,7 +136,7 @@ function r_nl(r, nr, Z, n, l)
     pwr(i) = pwr(i)*pwr(i-1)
   end do
   ! get the normalization constant
-  norm = sqrt((2*Z/n)**3/sum(pwr*ak2))
+  norm = sqrt((2*Z/n)**3/(4*pi*sum(pwr*ak2))) ! added in 4pi
   ! assemble parts
   r_nl = norm*rho**l*aterm*exp(-rho/2)
 end function r_nl
@@ -175,23 +176,23 @@ end function scrni
 ! number of electrons
 !
 function get_norb(ne)
-  integer(ik) :: ne
+  integer(ik) :: ne, get_norb
   !
-  integer(ik) :: l, maxocc, nl, get_norb
+  integer(ik) :: l, maxocc, nl
 
   get_norb = 0
   maxocc = 0
   nl = 0
-  do
+  step_nl: do
     nl = nl + 1
     do l = (nl - 1)/2,0,-1
       get_norb = get_norb + 1
       maxocc = maxocc + 4*l + 2
       if (maxocc >= ne) then
-          return
+        return
       end if
     end do
-  end do
+  end do step_nl
 end function get_norb
 
 !
@@ -257,12 +258,83 @@ subroutine rlegendre(nrad, Z, rad, wgt)
 
     call MathGetQuadrature('Legendre', nrad, r, w)
     atype = AtomElementSymbol(Z*1.0_rk)
-    rat = AtomCovalentR(atype)
+    rat = 0.5_rk * AtomCovalentR(atype) / abohr
     ! map from (-1, 1) to (0, ...)
     rad = rat * (1 + r) / (1 - r)
     ! scale weights appropriately
-    wgt = 8.0_rk * pi * w * rat * (r / (1 - r))**2
+    wgt = 8._rk * pi * w * rat * (rad / (1 - r))**2
+    !wgt = pi * w * rat * (rad / (1 - r))**2
 end subroutine rlegendre
+
+!
+!  Interpolate a point on a function f(x)
+!
+function interp(xpt, x, fx, nx, ityp, ordr)
+    character(3) :: ityp
+    integer(ik)  :: nx, ordr
+    real(rk)     :: xpt, x(nx)
+    real(ark)    :: fx(nx), interp
+    !
+    integer(ik)  :: i, ix, ind, n(ordr+1)
+
+    ! find the nearest index
+    find_ind: do ix = 2,nx
+        if (xpt < x(ix) .or. ix == nx) then
+            ind = ix - 1
+            exit
+        end if
+    end do find_ind
+    ! get the range of indices for interpolation
+    if (ind < ordr/2 + 1) then
+        n = (/(i, i = 1,ordr+1)/)
+    else if (ind+ordr/2+mod(ordr,2) > nx) then
+        n = (/(i, i = nx-ordr,nx)/)
+    else
+        n = (/(i, i = ind-ordr/2,ind+ordr/2+mod(ordr,2))/)
+    end if
+    select case (ityp)
+        case ("pol")
+            ! polynomial interpolation
+            interp = 0.
+            do i = 1,ordr+1
+                ! don't bother adding zeros
+                if (fx(n(i)) /= 0) then
+                    interp = interp + fx(n(i))*x_li(xpt, x, nx, i, n, ordr)
+                end if
+            end do
+        case ("exp")
+            ! exponential interpolation
+            interp = 1.
+            do i = 1,ordr+1
+                ! a f(x) value of 0 kills the interpolation
+                if (fx(n(i)) == 0) then
+                    interp = 0
+                    return
+                else
+                    interp = interp * fx(n(i))**x_li(xpt, x, nx, i, n, ordr)
+                end if
+            end do
+        case default
+            write (out,"('interp: Error unrecognized type ',s)") ityp
+            stop "interp - unrecognized type"
+    end select
+end function interp
+
+!
+!  Find the x weighting factor for interpolation
+!
+function x_li(xpt, x, nx, i, n, ordr)
+    integer(ik) :: i, ordr, nx, n(ordr+1)
+    real(rk)    :: xpt, x(nx), x_li
+    !
+    integer(ik) :: j
+    x_li = 1.
+    do j = 1,ordr+1
+        if (j /= i) then
+            x_li = x_li * (xpt - x(n(j))) / (x(n(i)) - x(n(j)))
+        end if
+    end do
+end function x_li
 
 !
 ! Return the cumulative sum of a 1D array

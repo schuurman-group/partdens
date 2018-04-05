@@ -8,13 +8,12 @@ MAKEFLAGS = -r
 #
 # System-specific overrides
 #
-
 include config.mak
 
 #
 # Finish the set-up
 #
-LIBS = $(LAPACK) $(FFTW3) $(DXLIB)
+LIBS = $(LAPACK) $(FFTW3)
 
 #
 # Compiling and archiving rules
@@ -40,7 +39,6 @@ makefile.dep: $(shell echo *.f90)
 #
 # Explicit dependencies
 #
-
 LIBFC += lapack.o
 LIBFC += math.o
 LIBFC += timer.o
@@ -54,7 +52,6 @@ LIBFC += atoms.o
 LIBFC += lebedev.o
 LIBFC += molecular_grid.o
 LIBFC += atomdens.o
-LIBFC += ddcharge.o
 
 #
 # Building the binaries
