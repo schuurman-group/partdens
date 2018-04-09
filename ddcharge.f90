@@ -11,14 +11,17 @@ program vddi
     use import_gamess
     use gamess_internal
     use molecular_grid
+    use atoms
     use atomdens
     !
-    character(100)           :: rdm_file="rdm.dat", atyp="slater", alib="scf.cc-pvdz",  wtyp="hirshfeld", ityp="exp"
+    character(100)           :: rdm_file="rdm.dat", atyp="abinitio", alib="scf.cc-pvdz",  wtyp="hirshfeld", ityp="exp"
+    character(20)            :: pname, wname
     character(2),allocatable :: atypes(:)
-    integer(ik)              :: pfile, hfile, cfile, mfile, wfile
-    integer(ik)              :: i, j, ib, ipt, iter, npts
+    logical,allocatable      :: aload(:,:)
+    integer(ik)              :: pfile, mfile, wfile
+    integer(ik)              :: i, ib, ipt, iter, npts
     integer(ik)              :: rdm_count, natom, nbatch, nuniq, norb
-    integer(ik)              :: nrad=70, nang=110, narad=70, maxiter=40, iordr=8
+    integer(ik)              :: nrad=70, nang=110, narad=70, maxiter=12, iordr=8, maxchg=2
     integer(ik),allocatable  :: iwhr(:), qlist(:)
     real(rk)                 :: norm, normatm, tmp_rdm_sv(1000), thrsh=1e-3
     real(rk),pointer         :: xyzw(:,:), xyz(:,:)
@@ -34,8 +37,6 @@ program vddi
     mfile=11
     pfile=12
     wfile=13
-    hfile=111
-    cfile=116
 
     call gamess_load_rdmsv(trim(rdm_file), tmp_rdm_sv, rdm_count)
     write (out,"( 'Found ',i4,' singular values')") rdm_count
@@ -62,7 +63,7 @@ program vddi
     !
     !  Molecular density numerical integration loop
     !
-    open(mfile, file='moldens.dat', action='write', status='new')
+    open(mfile, file='moldens', form='unformatted', action='write', status='new')
     norm = 0
     nullify(xyzw)
     mol_grid_batches: do ib = 1,nbatch
@@ -88,108 +89,48 @@ program vddi
         !
         mol_integrate: do ipt = 1,npts
             norm = norm + xyzw(4,ipt) * rhomol(ipt)
-            write(mfile,"(e18.10)") rhomol(ipt)
+            write(mfile) rhomol(ipt)
         end do mol_integrate
     end do mol_grid_batches
     close(mfile)
-    print *,'TOTAL MOLECULAR DENSITY: ', norm
+    print '("Total molecular density: ",f14.8)', norm
 
     !
-    !  Import spherically averaged densities
+    !  Import atomic properties
     !
     call unique(int(xyzq(4,:)), natom, iwhr, nuniq)
     allocate (qlist(nuniq), ax(nuniq,narad), aw(nuniq,narad))
-    allocate (acden(7,nuniq,narad), aden(natom,narad))
+    allocate (aload(2*maxchg+1,nuniq), acden(2*maxchg+1,nuniq,narad), aden(natom,narad))
     qlist = unique_list(int(xyzq(4,:)), natom, iwhr, nuniq)
-    select case (atyp)
-        case ("abinitio")
-            !open(lfile, "/home/rymac/Projects/PartialCharge/ddcharge/atomlib/" // alib)
-            ! everything in this section is temporary, need better import
-            open(hfile, file='/home/rymac/Projects/PartialCharge/ddcharge/atomlib/hydrog')
-            open(cfile, file='/home/rymac/Projects/PartialCharge/ddcharge/atomlib/carbon')
-            import_abinit: do i = 1,nuniq
-                if (qlist(i) == 1) then
-                    do j = 1,narad
-                      read(hfile,*) ax(i,j), acden(1,i,j), aw(i,j)
-                    end do
-                    do j = 1,narad
-                      read(hfile,*) ax(i,j), acden(2,i,j), aw(i,j)
-                    end do
-                    do j = 1,narad
-                      read(hfile,*) ax(i,j), acden(3,i,j), aw(i,j)
-                    end do
-                else if (qlist(i) == 6) then
-                    do j = 1,narad
-                      read(cfile,*) ax(i,j), acden(1,i,j), aw(i,j)
-                    end do
-                    do j = 1,narad
-                      read(cfile,*) ax(i,j), acden(2,i,j), aw(i,j)
-                    end do
-                    do j = 1,narad
-                      read(cfile,*) ax(i,j), acden(3,i,j), aw(i,j)
-                    end do
-                    do j = 1,narad
-                      read(cfile,*) ax(i,j), acden(4,i,j), aw(i,j)
-                    end do
-                    do j = 1,narad
-                      read(cfile,*) ax(i,j), acden(5,i,j), aw(i,j)
-                    end do
-                end if
-            end do import_abinit
-            close(hfile)
-            close(cfile)
-        case ("slater")
-            import_slater: do i = 1,nuniq
-                ! these don't work at the moment
-                call rlegendre(narad, qlist(i), ax(i,:), aw(i,:))
-                norb = get_norb(qlist(i))
-                call psisq(ax(i,:), aw(i,:), narad, qlist(i),  0, norb, 50, 1e-6_rk, acden(1,i,:))
-                norb = get_norb(qlist(i)+1)
-                call psisq(ax(i,:), aw(i,:), narad, qlist(i), -1, norb, 50, 1e-6_rk, acden(2,i,:))
-                norb = get_norb(qlist(i)-1)
-                call psisq(ax(i,:), aw(i,:), narad, qlist(i), +1, norb, 50, 1e-6_rk, acden(3,i,:))
-                norb = get_norb(qlist(i)+2)
-                call psisq(ax(i,:), aw(i,:), narad, qlist(i), -2, norb, 50, 1e-6_rk, acden(4,i,:))
-                norb = get_norb(qlist(i)-2)
-                call psisq(ax(i,:), aw(i,:), narad, qlist(i), +2, norb, 50, 1e-6_rk, acden(5,i,:))
-                norb = get_norb(qlist(i)+3)
-                call psisq(ax(i,:), aw(i,:), narad, qlist(i), -3, norb, 50, 1e-6_rk, acden(6,i,:))
-                norb = get_norb(qlist(i)-3)
-                call psisq(ax(i,:), aw(i,:), narad, qlist(i), +3, norb, 50, 1e-6_rk, acden(7,i,:))
-            end do import_slater
-        case default
-            write(out,"('atomic_dens: Error unrecognized type',s)") atyp
-            stop "atomic_dens - unrecognized type"
-    end select
+    setup_rad: do i = 1,nuniq
+        call rlegendre(narad, qlist(i), ax(i,:), aw(i,:))
+    end do setup_rad
 
     !
     !  Atomic density numerical integration loop
     !
-    open(mfile, file='moldens.dat', action='read')
-    open(pfile, file='density.dat', action='write', status='new')
-    open(wfile, file='weights.dat', action='write', status='new')
+    open(mfile, file='moldens', form='unformatted', action='read')
     charge(:) = 0
+    aload(:,:) = .false.
     iterate_chg: do iter = 1,maxiter
+        print '("ITER = "i4)', iter
+        if (iter < 10) then
+            write(pname,'("density.",i1)') iter
+            write(wname,'("weights.",i1)') iter
+        else if (iter < 100) then
+            write(pname,'("density.",i2)') iter
+            write(wname,'("weights.",i2)') iter
+        else
+            write(pname,'("density.",i3)') iter
+            write(wname,'("weights.",i3)') iter
+        end if
+        open(pfile, file=trim(pname), action='write', status='new')
+        open(wfile, file=trim(wname), action='write', status='new')
         rewind mfile
         !
         !  Set up the radial atomic densities
         !
-        setup_atom: do i = 1,natom
-            if (abs(charge(i)) > 2) then
-                write(out,"('setup_atom: Error |q',d,'| > 2')") i
-                stop "setup_atom - charge greater than 2"
-            else if (charge(i) < -1) then
-                aden(i,:) = (2 + charge(i))*acden(2,iwhr(i),:) - (1 + charge(i))*acden(4,iwhr(i),:)
-            else if (charge(i) > +1) then
-                aden(i,:) = (2 - charge(i))*acden(3,iwhr(i),:) + (charge(i) - 1)*acden(5,iwhr(i),:)
-            else if (charge(i) < 0) then
-                aden(i,:) = (1 + charge(i))*acden(1,iwhr(i),:) - charge(i)*acden(2,iwhr(i),:)
-            else if (charge(i) > 0) then
-                aden(i,:) = (1 - charge(i))*acden(1,iwhr(i),:) + charge(i)*acden(3,iwhr(i),:)
-            else
-                aden(i,:) = acden(1,iwhr(i),:)
-            end if
-        end do setup_atom
+        call update_atoms(charge, maxchg, qlist, natom, iwhr, nuniq, narad, alib, atyp, aload, ax, aw, acden, aden)
         call GridPointsBatch(den_grid, 'Reset')
         normatm    = 0
         dcharge(:) = 0
@@ -217,7 +158,7 @@ program vddi
             !  Read in molecular densities from file
             !
             read_rho: do ipt = 1,npts
-                read(mfile,*) rhomol(ipt)
+                read(mfile) rhomol(ipt)
             end do read_rho
             !
             !  Evaluate atomic densities at grid points
@@ -229,48 +170,60 @@ program vddi
             !
             awgt = assign_atom(xyzq(1:3,:), natom, xyzw(1:3,:), npts, rhoatm, wtyp)
             !
-            !  Integrate
-            !
-            integrate: do ipt = 1,npts
-                normatm = normatm + xyzw(4,ipt) * rhopro(ipt)
-                !if (iter == maxiter) then ! Only want this saved for the last iteration?
-                write(pfile,1000) xyzw(4,ipt), xyzw(1:3,ipt), rhopro(ipt)-rhomol(ipt)
-                write(wfile,'(*(e16.8))') awgt(:,ipt)
-                !end if
-            end do integrate
-            !
             !  Find the atomic contributions
             !
+            normatm = normatm + sum(xyzw(4,:) * rhopro)
             atom_contrib: do i = 1,natom
-                dcharge(i) = dcharge(i) + sum(awgt(i,:) * xyzw(4,:) * (rhopro(:) - rhomol(:)))
+                dcharge(i) = dcharge(i) + sum(awgt(i,:) * xyzw(4,:) * (rhopro - rhomol))
             end do atom_contrib
+            !
+            !  Output the densities for each point
+            !
+            integrate: do ipt = 1,npts
+                write(pfile,1000) xyzw(4,ipt), xyzw(1:3,ipt), rhopro(ipt)-rhomol(ipt)
+                write(wfile,'(*(e16.8))') awgt(:,ipt)
+            end do integrate
         end do grid_batches
-        charge(:) = charge(:) + dcharge(:)
+        close(pfile)
+        close(wfile)
+        charge = charge + dcharge
 
-        print *,'ITER: ', iter
-        print *,'TOTAL ATOMIC DENSITY: ', normatm
-        print *,'TOTAL CHANGE IN CHARGE: ', sum(dcharge)
-        print *,'CONTRIBUTIONS: ', dcharge
-        print *,''
+        do i = 1,natom
+            if (charge(i) > qlist(iwhr(i))) then
+                write(out,'("iterate_chg: Charge of ",f8.3," for atom ",i3," exceeds nuclear charge")') charge(i), i
+                stop "iterate_chg - atomic charge exceeds nuclear charge"
+            end if
+        end do
+
+        print '("Total atomic density: ",f14.8)', normatm
+        print '("Total change in charge: ",f14.8)', sum(dcharge)
+        print '("Contributions:")'
+        print '("    ",5f14.8)', dcharge
+        print '("")'
 
         if (maxval(abs(dcharge)) < thrsh) then
-            print *,"CHARGES CONVERGED ON ITER ", iter
-            print *,"FINAL CHARGES: ", charge
+            print '("Charges converged on ITER = ",i4)', iter
+            print '("Final charges:")'
+            print '("    ",5f14.8)', charge
             exit
         else if (iter == maxiter) then
-            print *,"CHARGES NOT CONVERGED FOR MAXITER"
-            print *,"UNCONVERGED CHARGES: ", charge
+            print '("Charges not converged for MAXITER = ",i4)', maxiter
+            print '("Unconverged charges:")'
+            print '("    ",5f14.8)', charge
         end if
     end do iterate_chg
     !
     !  Clean up
     !
-    close(pfile)
-    close(mfile)
-    close(wfile)
     call GridDestroy(den_grid)
+    close(mfile)
+    call system("rm moldens")
+    ! only keep data from the last iteration
+    call system("mv "//pname//" density.dat")
+    call system("mv "//wname//" weights.dat")
+    call system("rm density.[0-9]* weights.[0-9]*")
 
-    1000 format(e24.8,f16.8,f16.8,f16.8,es18.10)
+    1000 format(e24.8,f16.8,f16.8,f16.8,e20.10)
 
 contains
 
@@ -319,7 +272,7 @@ function unique_list(arr, narr, mask, nuniq)
 end function unique_list
 
 !
-!  Determine the density at XYZ coordinates
+!  Determine the molecular density at XYZ coordinates
 !
 subroutine evaluate_density(rdm_count, npt, mol, rdm_sv, xyz, rho)
     integer(ik),intent(in) :: rdm_count, npt
@@ -360,7 +313,7 @@ subroutine evaluate_density(rdm_count, npt, mol, rdm_sv, xyz, rho)
 end subroutine evaluate_density
 
 !
-!  Determine the atomic density contributions at grid XYZ coordinates
+!  Determine the atomic densities at grid XYZ coordinates
 !
 subroutine evaluate_atomic(rden, r, nr, xyzc, uind, nu, natm, ityp, iord, xyz, npt, rho)
     character(3) :: ityp
@@ -386,6 +339,99 @@ subroutine evaluate_atomic(rden, r, nr, xyzc, uind, nu, natm, ityp, iord, xyz, n
     end do evaluate_atom
 
 end subroutine evaluate_atomic
+
+!
+!  Update the atomic density functions as required
+!
+subroutine update_atoms(chg, maxc, ql, natm, uind, nu, narad, alib, atyp, aload, ax, aw, acden, aden)
+    character(*) :: alib, atyp
+    integer(ik)  :: natm, nu, narad, maxc, ql(nu), uind(natm)
+    logical      :: aload(2*maxc+1,nu)
+    real(rk)     :: chg(natm), ax(nu,narad), aw(nu,narad)
+    real(ark)    :: acden(2*maxc+1,nu,narad), aden(natom,narad)
+    !
+    integer(ik)  :: ia, il, iu, ui
+    real(rk)     :: modc, cthrsh=1e-3
+
+    update_aden: do ia = 1,natm
+        if (abs(chg(ia)) > maxc) then
+            write(out,'("update_atoms: abs(charge) greater than MAXCHG = ",i3)') maxc
+            stop "update_atoms - charge out of bounds"
+        end if
+        ui = uind(ia)
+        ! find the modulus (as it should be defined)
+        modc = chg(ia) - floor(chg(ia))
+        if (abs(modc) < cthrsh) then
+            ! integer charge, only get one contribution
+            il = maxc + 1 + nint(chg(ia))
+            if (.not. aload(il,ui)) then
+                ! import the integer density
+                call load_atom(ql(ui), nint(chg(ia)), narad, alib, atyp, ax(ui,:), aw(ui,:), acden(il,ui,:))
+                aload(il,ui) = .true.
+            end if
+            aden(ia,:) = acden(il,ui,:)
+        else
+            ! real charge, get ceil(chg) and floor(chg) contributions
+            il = maxc + 1 + floor(chg(ia))
+            iu = maxc + 1 + ceiling(chg(ia))
+            if (.not. aload(il,ui)) then
+                ! import the lower integer density
+                call load_atom(ql(ui), floor(chg(ia)), narad, alib, atyp, ax(ui,:), aw(ui,:), acden(il,ui,:))
+                aload(il,ui) = .true.
+            end if
+            if (.not. aload(iu,ui)) then
+                ! import the upper integer density
+                call load_atom(ql(ui), ceiling(chg(ia)), narad, alib, atyp, ax(ui,:), aw(ui,:), acden(iu,ui,:))
+                aload(iu,ui) = .true.
+            end if
+            aden(ia,:) = (1-modc)*acden(il,ui,:) + modc*acden(iu,ui,:)
+        end if
+    end do update_aden
+
+end subroutine update_atoms
+
+!
+!  Load an atomic density
+!
+subroutine load_atom(q, chg, narad, alib, atyp, ax, aw, aden)
+    character(*) :: alib, atyp
+    integer(ik)  :: narad, q, chg
+    real(rk)     :: ax(narad), aw(narad)
+    real(ark)    :: aden(narad)
+    !
+    character(2) :: elem, fel
+    integer(ik)  :: ipt, fch, fnr, ios, afile=111, niter=50
+    real(rk)     :: thrsh=1e-6, junk
+
+    select case (atyp)
+        case ("abinitio")
+            print '("Loading ab initio atomic density for Z = ",i3,", CHG = ",i3)', q, chg
+            open(afile, file="/home/rymac/Projects/PartialCharge/ddcharge/atomlib/"//alib)
+            elem = AtomElementSymbol(1._rk*q)
+            read_file: do
+                read(afile, *, iostat=ios) fel, fch, fnr
+                if (ios /= 0) then
+                    write(out,'("load_atom: ab initio density for ",a3,i3,i4," not found")') elem, chg, narad
+                    stop "load_atom - ab initio density not found"
+                end if
+                if ((trim(fel) == trim(elem)) .and. (fch == chg) .and. (fnr == narad)) then
+                    do ipt = 1,narad
+                        read(afile,*) junk, aden(ipt)
+                    end do
+                    exit read_file
+                end if
+            end do read_file
+            close(afile)
+        case ("slater")
+            print '("Loading Slater atomic density for Z = ",i3,", CHG = ",i3)', q, chg
+            norb = get_norb(q-chg)
+            call psisq(ax, aw, narad, q, chg, norb, niter, thrsh, aden)
+        case default
+            write(out,'("load_atom: Error unrecognized type",a10)') atyp
+            stop "load_atom - unrecognized type"
+    end select
+
+end subroutine load_atom
 
 !
 !  Determine the atomic weight factors on a grid
@@ -425,7 +471,7 @@ function assign_atom(xyzatm, natm, xyz, npt, rho, wtyp)
                 end if
             end do
         case default
-            write(out,"('assign_atom: Error unrecognized type',s)") wtyp
+            write(out,'("assign_atom: Error unrecognized type",a10)') wtyp
             stop "assign_atom - unrecognized type"
     end select
 end function assign_atom
