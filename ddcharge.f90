@@ -131,7 +131,7 @@ program vddi
     write(ofile,'("Starting atomic density evaluation")')
     write(ofile,'("")')
     open(mfile, file='moldens', form='unformatted', action='read')
-    charge(:) = 0
+    charge = 0
     aload(:,:) = .false.
     iterate_chg: do iter = 1,maxiter
         write(ofile,'("ITER = "i4)') iter
@@ -153,8 +153,8 @@ program vddi
         !
         call update_atoms(charge, maxchg, qlist, natom, iwhr, nuniq, narad, alib, atyp, aload, ax, aw, acden, aden)
         call GridPointsBatch(den_grid, 'Reset')
-        normatm    = 0
-        dcharge(:) = 0
+        normatm = 0
+        dcharge = 0
         nullify(xyzw)
         grid_batches: do ib = 1,nbatch
             !
@@ -337,25 +337,25 @@ subroutine init_output(rfile, nr, na, atyp, alib, nar, ityp, iord, wtyp, maxc, m
     write(ofile,'("")')
     write(ofile,'("")')
     write(ofile,'("Input summary:")')
-    write(ofile,'("    ----- Molecular density -----")')
-    write(ofile,'("    rdm_filename   =   ",a10)') trim(rfile)
-    write(ofile,'("    n_r_grid       =   ",i10)') nr
-    write(ofile,'("    n_ang_grid     =   ",i10)') na
+    write(ofile,'("    ------- Molecular density --------")')
+    write(ofile,'("    rdm_filename   =   ",a15)') trim(rfile)
+    write(ofile,'("    n_r_grid       =   ",i15)') nr
+    write(ofile,'("    n_ang_grid     =   ",i15)') na
     write(ofile,'("")')
-    write(ofile,'("    ------ Atomic density -------")')
-    write(ofile,'("    atom_type      =   ",a10)') trim(atyp)
-    write(ofile,'("    atom_library   =   ",a10)') trim(alib)
-    write(ofile,'("    n_r_atom       =   ",i10)') nar
+    write(ofile,'("    --------- Atomic density ---------")')
+    write(ofile,'("    atom_type      =   ",a15)') trim(atyp)
+    write(ofile,'("    atom_library   =   ",a15)') trim(alib)
+    write(ofile,'("    n_r_atom       =   ",i15)') nar
     write(ofile,'("")')
-    write(ofile,'("    ------- Interpolation -------")')
-    write(ofile,'("    interp_type    =   ",a10)') trim(ityp)
-    write(ofile,'("    interp_ord     =   ",i10)') iord
+    write(ofile,'("    --------- Interpolation ----------")')
+    write(ofile,'("    interp_type    =   ",a15)') trim(ityp)
+    write(ofile,'("    interp_ord     =   ",i15)') iord
     write(ofile,'("")')
-    write(ofile,'("    ---------- Charge -----------")')
-    write(ofile,'("    weight_type    =   ",a10)') trim(wtyp)
-    write(ofile,'("    max_charge     =   ",i10)') maxc
-    write(ofile,'("    max_iter       =   ",i10)') maxi
-    write(ofile,'("    chg_thresh     =   ",e10.3)') thr
+    write(ofile,'("    ------------- Charge -------------")')
+    write(ofile,'("    weight_type    =   ",a15)') trim(wtyp)
+    write(ofile,'("    max_charge     =   ",i15)') maxc
+    write(ofile,'("    max_iter       =   ",i15)') maxi
+    write(ofile,'("    chg_thresh     =   ",e15.3)') thr
     write(ofile,'("")')
 end subroutine init_output
 
@@ -535,6 +535,10 @@ subroutine load_atom(q, chg, narad, alib, atyp, ax, aw, aden)
     integer(ik)  :: ipt, fch, fnr, ios, afile=111, niter=50
     real(rk)     :: thrsh=1e-6, junk
 
+    if (chg >= q) then
+        aden = 0
+        return
+    end if
     select case (atyp)
         case ("abinitio")
             write(ofile,'("Loading ab initio atomic density for Z = ",i3,", CHG = ",i3)') q, chg

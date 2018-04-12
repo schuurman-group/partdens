@@ -1,5 +1,6 @@
 goal: makefile.dep
 	make ddcharge.x
+	make sphatom.x
 
 MAKEFLAGS = -r
 
@@ -58,6 +59,9 @@ LIBFC += atomdens.o
 #
 ddcharge.x: ddcharge.o $(LIBFC)
 	$(F90) -o ddcharge.x ddcharge.o $(LIBFC) $(LIBS)
+
+sphatom.x: sphatom.o $(LIBFC)
+	$(F90) -o sphatom.x sphatom.o $(LIBFC) $(LIBS)
 
 #
 # Automatically-generated dependencies
