@@ -14,16 +14,17 @@ program vddi
     use atoms
     use atomdens
     !
-    character(100)           :: rdm_file="rdm.dat", atyp="abinitio", alib="scf.cc-pvdz",  wtyp="hirshfeld", ityp="exp"
+    character(100),parameter :: infile="ddcharge.inp", outfile="ddcharge.out"
+    character(100)           :: rdm_file, atyp, alib, wtyp, ityp
     character(20)            :: pname, wname
     character(2),allocatable :: atypes(:)
     logical,allocatable      :: aload(:,:)
-    integer(ik)              :: pfile, mfile, wfile
+    integer(ik)              :: ofile, mfile, pfile, wfile
     integer(ik)              :: i, ib, ipt, iter, npts
     integer(ik)              :: rdm_count, natom, nbatch, nuniq, norb
-    integer(ik)              :: nrad=70, nang=110, narad=70, maxiter=12, iordr=8, maxchg=2
+    integer(ik)              :: nrad, nang, narad, maxiter, iordr, maxchg
     integer(ik),allocatable  :: iwhr(:), qlist(:)
-    real(rk)                 :: norm, normatm, tmp_rdm_sv(1000), thrsh=1e-3
+    real(rk)                 :: norm, normatm, tmp_rdm_sv(1000), thrsh
     real(rk),pointer         :: xyzw(:,:), xyz(:,:)
     real(rk),allocatable     :: xyzq(:,:), ax(:,:), aw(:,:), awgt(:,:)
     real(rk),allocatable     :: charge(:), dcharge(:)
@@ -34,14 +35,21 @@ program vddi
 
     call accuracyInitialize
 
+    ofile=10
     mfile=11
     pfile=12
     wfile=13
 
+    open(ofile, file=outfile)
+    call read_input(infile, rdm_file, nrad, nang, atyp, alib, narad, ityp, iordr, wtyp, maxchg, maxiter, thrsh)
+    call init_output(rdm_file, nrad, nang, atyp, alib, narad, ityp, iordr, wtyp, maxchg, maxiter, thrsh)
+
+    write(ofile,'("Loading GAMESS RDM file")')
     call gamess_load_rdmsv(trim(rdm_file), tmp_rdm_sv, rdm_count)
-    write (out,"( 'Found ',i4,' singular values')") rdm_count
-    write (out,"( 'Values are: '/)")
-    write (out,"(10(1x,f12.8))") tmp_rdm_sv(:rdm_count)
+    write(ofile,'("Found ",i4," singular values")') rdm_count
+    write(ofile,'("Values are:")')
+    write(ofile,'(10(1x,f12.8))') tmp_rdm_sv(:rdm_count)
+    write(ofile,'("")')
     !
     allocate (rdm_sv(rdm_count))
     rdm_sv = tmp_rdm_sv(:rdm_count)
@@ -55,15 +63,23 @@ program vddi
     do i = 1,mol%natoms
         atypes(i) = trim(mol%atoms(i)%name)
     enddo
+    write(ofile,'("Molecular geometry (in bohr):")')
+    do i = 1,mol%natoms
+        write(ofile,'("    ",a2,3f14.8)') atypes(i), xyzq(1:3,i)
+    end do
+    write(ofile,'("")')
     !
     !  Set up the grid
     !
+    write(ofile,'("Setting up the molecular grid")')
+    write(ofile,'("")')
     call GridInitialize(den_grid, nrad, nang, xyzq(1:3,:), atypes)
     call GridPointsBatch(den_grid, 'Batches count', count=nbatch)
     !
     !  Molecular density numerical integration loop
     !
-    open(mfile, file='moldens', form='unformatted', action='write', status='new')
+    write(ofile,'("Calculating molecular density")')
+    open(mfile, file='moldens', form='unformatted', action='write')
     norm = 0
     nullify(xyzw)
     mol_grid_batches: do ib = 1,nbatch
@@ -93,11 +109,14 @@ program vddi
         end do mol_integrate
     end do mol_grid_batches
     close(mfile)
-    print '("Total molecular density: ",f14.8)', norm
+    write(ofile,'("Total molecular density: ",f14.8)') norm
+    write(ofile,'("")')
 
     !
     !  Import atomic properties
     !
+    write(ofile,'("Calculating radial atomic grid")')
+    write(ofile,'("")')
     call unique(int(xyzq(4,:)), natom, iwhr, nuniq)
     allocate (qlist(nuniq), ax(nuniq,narad), aw(nuniq,narad))
     allocate (aload(2*maxchg+1,nuniq), acden(2*maxchg+1,nuniq,narad), aden(natom,narad))
@@ -109,11 +128,13 @@ program vddi
     !
     !  Atomic density numerical integration loop
     !
+    write(ofile,'("Starting atomic density evaluation")')
+    write(ofile,'("")')
     open(mfile, file='moldens', form='unformatted', action='read')
     charge(:) = 0
     aload(:,:) = .false.
     iterate_chg: do iter = 1,maxiter
-        print '("ITER = "i4)', iter
+        write(ofile,'("ITER = "i4)') iter
         if (iter < 10) then
             write(pname,'("density.",i1)') iter
             write(wname,'("weights.",i1)') iter
@@ -124,8 +145,8 @@ program vddi
             write(pname,'("density.",i3)') iter
             write(wname,'("weights.",i3)') iter
         end if
-        open(pfile, file=trim(pname), action='write', status='new')
-        open(wfile, file=trim(wname), action='write', status='new')
+        open(pfile, file=trim(pname), action='write')
+        open(wfile, file=trim(wname), action='write')
         rewind mfile
         !
         !  Set up the radial atomic densities
@@ -190,26 +211,26 @@ program vddi
 
         do i = 1,natom
             if (charge(i) > qlist(iwhr(i))) then
-                write(out,'("iterate_chg: Charge of ",f8.3," for atom ",i3," exceeds nuclear charge")') charge(i), i
+                write(ofile,'("iterate_chg: Charge of ",f8.3," for atom ",i3," exceeds nuclear charge")') charge(i), i
                 stop "iterate_chg - atomic charge exceeds nuclear charge"
             end if
         end do
 
-        print '("Total atomic density: ",f14.8)', normatm
-        print '("Total change in charge: ",f14.8)', sum(dcharge)
-        print '("Contributions:")'
-        print '("    ",5f14.8)', dcharge
-        print '("")'
+        write(ofile,'("Total atomic density: ",f14.8)') normatm
+        write(ofile,'("Total change in charge: ",f14.8)') sum(dcharge)
+        write(ofile,'("Contributions:")')
+        write(ofile,'("    ",8f14.8)') dcharge
+        write(ofile,'("")')
 
         if (maxval(abs(dcharge)) < thrsh) then
-            print '("Charges converged on ITER = ",i4)', iter
-            print '("Final charges:")'
-            print '("    ",5f14.8)', charge
+            write(ofile,'("Charges converged on ITER = ",i4)') iter
+            write(ofile,'("Final charges:")')
+            write(ofile,'("    ",8f14.8)') charge
             exit
         else if (iter == maxiter) then
-            print '("Charges not converged for MAXITER = ",i4)', maxiter
-            print '("Unconverged charges:")'
-            print '("    ",5f14.8)', charge
+            write(ofile,'("Charges not converged for MAXITER = ",i4)') maxiter
+            write(ofile,'("Unconverged charges:")')
+            write(ofile,'("    ",8f14.8)') charge
         end if
     end do iterate_chg
     !
@@ -222,10 +243,121 @@ program vddi
     call system("mv "//pname//" density.dat")
     call system("mv "//wname//" weights.dat")
     call system("rm density.[0-9]* weights.[0-9]*")
+    write(ofile,'("")')
+    write(ofile,'("Exited successfully")')
 
     1000 format(e24.8,f16.8,f16.8,f16.8,e20.10)
 
 contains
+
+!
+!  Read a crude input file
+!
+subroutine read_input(infile, rfile, nr, na, atyp, alib, nar, ityp, iord, wtyp, maxc, maxi, thr)
+    character(100) :: infile, rfile, atyp, alib, wtyp, ityp
+    integer(ik)    :: nr, na, nar, maxi, iord, maxc
+    real(rk)       :: thr
+    !
+    character(20)  :: varname, var
+    integer(ik)    :: ios, nvar
+
+    ios = 0
+    nvar = 0
+    open(22, file=infile)
+    parse_input: do
+        read(22,*,iostat=ios) varname, var
+        if (ios /= 0) then
+            exit parse_input
+        end if
+        select case (varname)
+            case ("rdm_filename")
+                rfile = var
+                nvar = nvar + 1
+            case ("n_r_grid")
+                read(var,*,iostat=ios) nr
+                nvar = nvar + 1
+            case ("n_ang_grid")
+                read(var,*,iostat=ios) na
+                nvar = nvar + 1
+            case ("atom_type")
+                atyp = var
+                nvar = nvar + 1
+            case ("atom_library")
+                alib = var
+                nvar = nvar + 1
+            case ("n_r_atom")
+                read(var,*,iostat=ios) nar
+                nvar = nvar + 1
+            case ("interp_type")
+                ityp = var
+                nvar = nvar + 1
+            case ("interp_ord")
+                read(var,*,iostat=ios) iord
+                nvar = nvar + 1
+            case ("weight_type")
+                wtyp = var
+                nvar = nvar + 1
+            case ("max_charge")
+                read(var,*,iostat=ios) maxc
+                nvar = nvar + 1
+            case ("max_iter")
+                read(var,*,iostat=ios) maxi
+                nvar = nvar + 1
+            case ("chg_thresh")
+                read(var,*,iostat=ios) thr
+                nvar = nvar + 1
+        end select
+        if (ios /= 0) then
+            write(ofile,'("read_input: Incorrect type for variable ",a)') varname
+            stop "read_input - incorrect variable type"
+        end if
+    end do parse_input
+    if (nvar < 12) then
+        write(ofile,'("read_input: Missing variable")')
+        stop "read_input - missing variable"
+    end if
+
+end subroutine read_input
+
+!
+!  Initialize the output file
+!
+subroutine init_output(rfile, nr, na, atyp, alib, nar, ityp, iord, wtyp, maxc, maxi, thr)
+    character(100) :: rfile, atyp, alib, wtyp, ityp
+    integer(ik)    :: nr, na, nar, maxi, iord, maxc
+    real(rk)       :: thr
+
+    write(ofile,'("+--------------------------------------------------+")')
+    write(ofile,'("|                                                  |")')
+    write(ofile,'("|                     DDCharge                     |")')
+    write(ofile,'("|                                                  |")')
+    write(ofile,'("|    Deformation density partial atomic charges    |")')
+    write(ofile,'("|         RJ MacDonell, MS Schuurman 2018          |")')
+    write(ofile,'("+--------------------------------------------------+")')
+    write(ofile,'("")')
+    write(ofile,'("")')
+    write(ofile,'("Input summary:")')
+    write(ofile,'("    ----- Molecular density -----")')
+    write(ofile,'("    rdm_filename   =   ",a10)') trim(rfile)
+    write(ofile,'("    n_r_grid       =   ",i10)') nr
+    write(ofile,'("    n_ang_grid     =   ",i10)') na
+    write(ofile,'("")')
+    write(ofile,'("    ------ Atomic density -------")')
+    write(ofile,'("    atom_type      =   ",a10)') trim(atyp)
+    write(ofile,'("    atom_library   =   ",a10)') trim(alib)
+    write(ofile,'("    n_r_atom       =   ",i10)') nar
+    write(ofile,'("")')
+    write(ofile,'("    ------- Interpolation -------")')
+    write(ofile,'("    interp_type    =   ",a10)') trim(ityp)
+    write(ofile,'("    interp_ord     =   ",i10)') iord
+    write(ofile,'("")')
+    write(ofile,'("    ---------- Charge -----------")')
+    write(ofile,'("    weight_type    =   ",a10)') trim(wtyp)
+    write(ofile,'("    max_charge     =   ",i10)') maxc
+    write(ofile,'("    max_iter       =   ",i10)') maxi
+    write(ofile,'("    chg_thresh     =   ",e10.3)') thr
+    write(ofile,'("")')
+end subroutine init_output
 
 !
 !  Find unique elements of a list and return a mask
@@ -355,7 +487,7 @@ subroutine update_atoms(chg, maxc, ql, natm, uind, nu, narad, alib, atyp, aload,
 
     update_aden: do ia = 1,natm
         if (abs(chg(ia)) > maxc) then
-            write(out,'("update_atoms: abs(charge) greater than MAXCHG = ",i3)') maxc
+            write(ofile,'("update_atoms: abs(charge) greater than MAXCHG = ",i3)') maxc
             stop "update_atoms - charge out of bounds"
         end if
         ui = uind(ia)
@@ -405,13 +537,13 @@ subroutine load_atom(q, chg, narad, alib, atyp, ax, aw, aden)
 
     select case (atyp)
         case ("abinitio")
-            print '("Loading ab initio atomic density for Z = ",i3,", CHG = ",i3)', q, chg
+            write(ofile,'("Loading ab initio atomic density for Z = ",i3,", CHG = ",i3)') q, chg
             open(afile, file="/home/rymac/Projects/PartialCharge/ddcharge/atomlib/"//alib)
             elem = AtomElementSymbol(1._rk*q)
             read_file: do
                 read(afile, *, iostat=ios) fel, fch, fnr
                 if (ios /= 0) then
-                    write(out,'("load_atom: ab initio density for ",a3,i3,i4," not found")') elem, chg, narad
+                    write(ofile,'("load_atom: ab initio density for ",a3,i3,i4," not found")') elem, chg, narad
                     stop "load_atom - ab initio density not found"
                 end if
                 if ((trim(fel) == trim(elem)) .and. (fch == chg) .and. (fnr == narad)) then
@@ -423,11 +555,11 @@ subroutine load_atom(q, chg, narad, alib, atyp, ax, aw, aden)
             end do read_file
             close(afile)
         case ("slater")
-            print '("Loading Slater atomic density for Z = ",i3,", CHG = ",i3)', q, chg
+            write(ofile,'("Loading Slater atomic density for Z = ",i3,", CHG = ",i3)') q, chg
             norb = get_norb(q-chg)
             call psisq(ax, aw, narad, q, chg, norb, niter, thrsh, aden)
         case default
-            write(out,'("load_atom: Error unrecognized type",a10)') atyp
+            write(ofile,'("load_atom: Error unrecognized type",a10)') atyp
             stop "load_atom - unrecognized type"
     end select
 
@@ -471,7 +603,7 @@ function assign_atom(xyzatm, natm, xyz, npt, rho, wtyp)
                 end if
             end do
         case default
-            write(out,'("assign_atom: Error unrecognized type",a10)') wtyp
+            write(ofile,'("assign_atom: Error unrecognized type",a10)') wtyp
             stop "assign_atom - unrecognized type"
     end select
 end function assign_atom
