@@ -15,7 +15,7 @@ program vddi
     use atomdens
     !
     character(100),parameter :: infile="ddcharge.inp", outfile="ddcharge.out"
-    character(100)           :: rdm_file, atyp, alib, wtyp, ityp
+    character(100)           :: rdm_file, vectyp, atyp, alib, wtyp, ityp
     character(20)            :: pname, wname
     character(2),allocatable :: atypes(:)
     logical,allocatable      :: aload(:,:)
@@ -41,14 +41,14 @@ program vddi
     wfile=13
 
     open(ofile, file=outfile)
-    call read_input(infile, rdm_file, nrad, nang, atyp, alib, narad, ityp, iordr, wtyp, maxchg, maxiter, thrsh)
-    call init_output(rdm_file, nrad, nang, atyp, alib, narad, ityp, iordr, wtyp, maxchg, maxiter, thrsh)
+    call read_input(infile, rdm_file, vectyp, nrad, nang, atyp, alib, narad, ityp, iordr, wtyp, maxchg, maxiter, thrsh)
+    call init_output(rdm_file, vectyp, nrad, nang, atyp, alib, narad, ityp, iordr, wtyp, maxchg, maxiter, thrsh)
 
     write(ofile,'("Loading GAMESS RDM file")')
     call gamess_load_rdmsv(trim(rdm_file), tmp_rdm_sv, rdm_count)
     write(ofile,'("Found ",i4," singular values")') rdm_count
     write(ofile,'("Values are:")')
-    write(ofile,'(10(1x,f12.8))') tmp_rdm_sv(:rdm_count)
+    write(ofile,'(5(1x,f12.8))') tmp_rdm_sv(:rdm_count)
     write(ofile,'("")')
     !
     allocate (rdm_sv(rdm_count))
@@ -80,7 +80,7 @@ program vddi
     !
     write(ofile,'("Calculating molecular density")')
     open(mfile, file='moldens', form='unformatted', action='write')
-    norm = 0
+    norm = 0_rk
     nullify(xyzw)
     mol_grid_batches: do ib = 1,nbatch
         !
@@ -99,7 +99,7 @@ program vddi
         !
         !  Evaluate density at grid points
         !
-        call evaluate_density(rdm_count, npts, mol, rdm_sv, xyz, rhomol)
+        call evaluate_density(vectyp, rdm_count, npts, mol, rdm_sv, xyz, rhomol)
         !
         !  Integrate and save
         !
@@ -131,7 +131,7 @@ program vddi
     write(ofile,'("Starting atomic density evaluation")')
     write(ofile,'("")')
     open(mfile, file='moldens', form='unformatted', action='read')
-    charge = 0
+    charge = 0_rk
     aload(:,:) = .false.
     iterate_chg: do iter = 1,maxiter
         write(ofile,'("ITER = "i4)') iter
@@ -153,8 +153,8 @@ program vddi
         !
         call update_atoms(charge, maxchg, qlist, natom, iwhr, nuniq, narad, alib, atyp, aload, ax, aw, acden, aden)
         call GridPointsBatch(den_grid, 'Reset')
-        normatm = 0
-        dcharge = 0
+        normatm = 0_rk
+        dcharge = 0_rk
         nullify(xyzw)
         grid_batches: do ib = 1,nbatch
             !
@@ -219,18 +219,18 @@ program vddi
         write(ofile,'("Total atomic density: ",f14.8)') normatm
         write(ofile,'("Total change in charge: ",f14.8)') sum(dcharge)
         write(ofile,'("Contributions:")')
-        write(ofile,'("    ",8f14.8)') dcharge
+        write(ofile,'("    ",5f14.8)') dcharge
         write(ofile,'("")')
 
         if (maxval(abs(dcharge)) < thrsh) then
             write(ofile,'("Charges converged on ITER = ",i4)') iter
             write(ofile,'("Final charges:")')
-            write(ofile,'("    ",8f14.8)') charge
+            write(ofile,'("    ",5f14.8)') charge
             exit
         else if (iter == maxiter) then
             write(ofile,'("Charges not converged for MAXITER = ",i4)') maxiter
             write(ofile,'("Unconverged charges:")')
-            write(ofile,'("    ",8f14.8)') charge
+            write(ofile,'("    ",5f14.8)') charge
         end if
     end do iterate_chg
     !
@@ -253,8 +253,8 @@ contains
 !
 !  Read a crude input file
 !
-subroutine read_input(infile, rfile, nr, na, atyp, alib, nar, ityp, iord, wtyp, maxc, maxi, thr)
-    character(100) :: infile, rfile, atyp, alib, wtyp, ityp
+subroutine read_input(infile, rfile, vtyp, nr, na, atyp, alib, nar, ityp, iord, wtyp, maxc, maxi, thr)
+    character(100) :: infile, rfile, vtyp, atyp, alib, wtyp, ityp
     integer(ik)    :: nr, na, nar, maxi, iord, maxc
     real(rk)       :: thr
     !
@@ -272,6 +272,9 @@ subroutine read_input(infile, rfile, nr, na, atyp, alib, nar, ityp, iord, wtyp, 
         select case (varname)
             case ("rdm_filename")
                 rfile = var
+                nvar = nvar + 1
+            case ("vec_type")
+                vtyp = var
                 nvar = nvar + 1
             case ("n_r_grid")
                 read(var,*,iostat=ios) nr
@@ -312,7 +315,7 @@ subroutine read_input(infile, rfile, nr, na, atyp, alib, nar, ityp, iord, wtyp, 
             stop "read_input - incorrect variable type"
         end if
     end do parse_input
-    if (nvar < 12) then
+    if (nvar < 13) then
         write(ofile,'("read_input: Missing variable")')
         stop "read_input - missing variable"
     end if
@@ -322,8 +325,8 @@ end subroutine read_input
 !
 !  Initialize the output file
 !
-subroutine init_output(rfile, nr, na, atyp, alib, nar, ityp, iord, wtyp, maxc, maxi, thr)
-    character(100) :: rfile, atyp, alib, wtyp, ityp
+subroutine init_output(rfile, vtyp, nr, na, atyp, alib, nar, ityp, iord, wtyp, maxc, maxi, thr)
+    character(100) :: rfile, vtyp, atyp, alib, wtyp, ityp
     integer(ik)    :: nr, na, nar, maxi, iord, maxc
     real(rk)       :: thr
 
@@ -339,6 +342,7 @@ subroutine init_output(rfile, nr, na, atyp, alib, nar, ityp, iord, wtyp, maxc, m
     write(ofile,'("Input summary:")')
     write(ofile,'("    ------- Molecular density --------")')
     write(ofile,'("    rdm_filename   =   ",a15)') trim(rfile)
+    write(ofile,'("    vec_type       =   ",a15)') trim(vtyp)
     write(ofile,'("    n_r_grid       =   ",i15)') nr
     write(ofile,'("    n_ang_grid     =   ",i15)') na
     write(ofile,'("")')
@@ -369,7 +373,7 @@ subroutine unique(arr, narr, mask, nuniq)
     integer(ik) :: i, j, ident(100)
 
     nuniq = 0
-    mask(:) = 0
+    mask = 0
     parse_list: do i = 1,narr
         check_list: do j = 1,nuniq
             if (arr(i) == ident(j)) then
@@ -406,16 +410,17 @@ end function unique_list
 !
 !  Determine the molecular density at XYZ coordinates
 !
-subroutine evaluate_density(rdm_count, npt, mol, rdm_sv, xyz, rho)
-    integer(ik),intent(in) :: rdm_count, npt
-    type(gam_structure), intent(inout)   :: mol
-    real(rk), intent(in)   :: rdm_sv(rdm_count)
-    real(rk), intent(in)   :: xyz(3,npt)
-    real(rk), intent(out)  :: rho(npt)
+subroutine evaluate_density(vtyp, rdm_count, npt, mol, rdm_sv, xyz, rho)
+    character(100),intent(in) :: vtyp
+    integer(ik),intent(in)    :: rdm_count, npt
+    type(gam_structure),intent(inout)   :: mol
+    real(rk),intent(in)       :: rdm_sv(rdm_count)
+    real(rk),intent(in)       :: xyz(3,npt)
+    real(ark),intent(out)     :: rho(npt)
     !
-    integer(ik)            :: ipt, ird, imo, nmo, nbas
-    real(ark), allocatable :: basval(:,:,:)
-    real(rk), allocatable  :: moval (:,:)
+    integer(ik)               :: ipt, ird, imo, nmo, nbas
+    real(ark),allocatable     :: basval(:,:,:)
+    real(rk),allocatable      :: moval(:,:)
 
     nmo  = mol%nvectors
     nbas = mol%nbasis
@@ -434,11 +439,21 @@ subroutine evaluate_density(rdm_count, npt, mol, rdm_sv, xyz, rho)
     !
     !  Finally, evaluate the transition density at grid points
     !
-    rho(:) = 0
-    evaluate_rdm: do ird = 1,rdm_count
-        imo = 2*ird - 1
-        rho = rho + rdm_sv(ird) * moval(imo,:) * moval(imo+1,:)
-    end do evaluate_rdm
+    rho = 0_ark
+    select case (vtyp)
+        case ("tr1rdm")
+            evaluate_rdm: do ird=1,rdm_count
+                imo = 2*ird - 1
+                rho = rho + rdm_sv(ird) * moval(imo,:) * moval(imo+1,:)
+            end do evaluate_rdm
+        case ("natorb")
+            evaluate_nat: do ird=1,rdm_count
+                rho = rho + rdm_sv(ird) * moval(ird,:)**2
+            end do evaluate_nat
+        case default
+            write(out,'("evaluate_density: Unrecognized VEC type ",a8)') vtyp
+            stop "evaluate_density - bad VEC type"
+    end select
     !
     deallocate (basval,moval)
 
@@ -456,7 +471,7 @@ subroutine evaluate_atomic(rden, r, nr, xyzc, uind, nu, natm, ityp, iord, xyz, n
     integer(ik)  :: iatm, ipt, ui
     real(rk)     :: ratm
 
-    rho(:,:) = 0
+    rho(:,:) = 0_ark
     evaluate_atom: do iatm = 1,natm
         ui = uind(iatm)
         interp_point: do ipt = 1,npt
@@ -536,7 +551,7 @@ subroutine load_atom(q, chg, narad, alib, atyp, ax, aw, aden)
     real(rk)     :: thrsh=1e-6, junk
 
     if (chg >= q) then
-        aden = 0
+        aden = 0_ark
         return
     end if
     select case (atyp)
@@ -583,7 +598,7 @@ function assign_atom(xyzatm, natm, xyz, npt, rho, wtyp)
 
     select case (wtyp)
         case ("voronoi")
-            assign_atom(:,:) = 0
+            assign_atom = 0_rk
             do ipt = 1,npt
                 dist = sqrt((xyz(1,ipt)-xyzatm(1,:))**2 + &
                             (xyz(2,ipt)-xyzatm(2,:))**2 + &
@@ -598,7 +613,7 @@ function assign_atom(xyzatm, natm, xyz, npt, rho, wtyp)
             end do
         case ("hirshfeld")
             rhotot = sum(rho, dim=1)
-            assign_atom(:,:) = 0
+            assign_atom = 0_rk
             do ipt = 1,npt
                 if (rhotot(ipt) > 0) then
                     do iatm = 1,natm

@@ -9,14 +9,14 @@ program sphatom
     use atomdens
     use lebedev
     !
-    character(len=100)           :: rdm_file="rdm.dat"
-    integer(ik)                  :: ib, ios, achg, pfile, rdm_count, natom
-    integer(ik),parameter        :: nrad=70, nang=770
-    real(rk)                     :: tmp_rdm_sv(1000), xyzq(4,1)
-    real(rk),allocatable         :: r(:), w(:), xyz(:,:)
-    real(rk),pointer             :: ang_xyzw(:,:)
-    real(ark),allocatable        :: rho(:), rdm_sv(:), rden(:)
-    type(gam_structure)          :: mol
+    character(100),parameter :: rdm_file="rdm.dat", vectyp="natorb"
+    integer(ik)              :: ib, ios, achg, pfile, rdm_count, natom
+    integer(ik),parameter    :: nrad=70, nang=770
+    real(rk)                 :: tmp_rdm_sv(1000), xyzq(4,1)
+    real(rk),allocatable     :: r(:), w(:), xyz(:,:)
+    real(rk),pointer         :: ang_xyzw(:,:)
+    real(ark),allocatable    :: rho(:), rdm_sv(:), rden(:)
+    type(gam_structure)      :: mol
 
     call accuracyInitialize
 
@@ -28,7 +28,7 @@ program sphatom
     call gamess_load_rdmsv(trim(rdm_file),tmp_rdm_sv,rdm_count)
     write(out,'("Found ",i4," singular values")') rdm_count
     write(out,'("Values are: "/)')
-    write(out,'(10(1x,f12.8))') tmp_rdm_sv(:rdm_count)
+    write(out,'(5(1x,f12.8))') tmp_rdm_sv(:rdm_count)
     write(out,'("")')
     !
     allocate (rdm_sv(rdm_count))
@@ -67,7 +67,7 @@ program sphatom
         !
         !  Evaluate density at grid points
         !
-        call evaluate_density(rdm_count, nang, mol, rdm_sv, xyz, rho)
+        call evaluate_density(vectyp, rdm_count, nang, mol, rdm_sv, xyz, rho)
         !
         !  Integrate the spherical shell
         !
@@ -89,16 +89,13 @@ contains
 !
 !  Evaluate the electron density at a set of grid points
 !
-subroutine evaluate_density(rdm_count, npt, mol, rdm_sv, xyz, rho)
-    use accuracy
-    use import_gamess
-    use gamess_internal
-
-    integer(ik),intent(in)             :: rdm_count, npt
-    type(gam_structure), intent(inout) :: mol
-    real(rk), intent(in)               :: rdm_sv(rdm_count)
-    real(rk), intent(in)               :: xyz(3,npt)
-    real(rk), intent(out)              :: rho(npt)
+subroutine evaluate_density(vtyp, rdm_count, npt, mol, rdm_sv, xyz, rho)
+    character(100),intent(in)         :: vtyp
+    integer(ik),intent(in)            :: rdm_count, npt
+    type(gam_structure),intent(inout) :: mol
+    real(rk),intent(in)               :: rdm_sv(rdm_count)
+    real(rk),intent(in)               :: xyz(3,npt)
+    real(ark),intent(out)             :: rho(npt)
     !
     integer(ik)            :: ipt, ird, imo, nmo, nbas
     real(ark), allocatable :: basval(:,:,:)
@@ -121,11 +118,21 @@ subroutine evaluate_density(rdm_count, npt, mol, rdm_sv, xyz, rho)
     !
     !  Finally, evaluate the transition density at grid points
     !
-    rho = 0
-    evaluate_rdm: do ird=1,rdm_count
-        imo = 2*ird - 1
-        rho = rho + rdm_sv(ird) * moval(imo,:) * moval(imo+1,:)
-    end do evaluate_rdm
+    rho = 0_ark
+    select case (vtyp)
+        case ("tr1rdm")
+            evaluate_rdm: do ird=1,rdm_count
+                imo = 2*ird - 1
+                rho = rho + rdm_sv(ird) * moval(imo,:) * moval(imo+1,:)
+            end do evaluate_rdm
+        case ("natorb")
+            evaluate_nat: do ird=1,rdm_count
+                rho = rho + rdm_sv(ird) * moval(ird,:)**2
+            end do evaluate_nat
+        case default
+            write(out,'("evaluate_density: Unrecognized VEC type ",a8)') vtyp
+            stop "evaluate_density - bad VEC type"
+    end select
     !
     deallocate (basval,moval)
 

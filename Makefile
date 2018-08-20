@@ -1,4 +1,5 @@
 goal: makefile.dep
+	make bader.x
 	make ddcharge.x
 	make sphatom.x
 
@@ -57,6 +58,9 @@ LIBFC += atomdens.o
 #
 # Building the binaries
 #
+bader.x: bader.o $(LIBFC)
+	$(F90) -o bader.x bader.o $(LIBFC) $(LIBS)
+
 ddcharge.x: ddcharge.o $(LIBFC)
 	$(F90) -o ddcharge.x ddcharge.o $(LIBFC) $(LIBS)
 
