@@ -17,19 +17,19 @@ program bader
     !
     character(100),parameter :: infile="ddcharge.inp", outfile="ddcharge.out"
     character(100)           :: rdm_file, vectyp, atyp, alib, wtyp, ityp
-    character(2),allocatable :: atypes(:)
+    character(2),allocatable :: atypes(:), gatyp(:)
     logical                  :: first_shell, last, ls
     logical,allocatable      :: adone(:,:)
     integer(ik)              :: ofile, mfile
     integer(ik)              :: i, ib, ipt, npts, nax
-    integer(ik)              :: rdm_count, natom, nbatch
+    integer(ik)              :: rdm_count, natom, ndum, nbatch
     integer(ik)              :: nrad, nang, narad, maxiter, iordr, maxchg
-    integer(ik),allocatable  :: iwhr(:), nnn(:), nmask(:,:), asgn(:,:)
+    integer(ik),allocatable  :: nnn(:), nmask(:,:), asgn(:,:)
     real(rk)                 :: norm, tmp_rdm_sv(1000), thrsh, dist
     real(rk)                 :: avg_now(3), avg_nxt(3)
-    real(rk),pointer         :: xyzw_lst(:,:), xyzw_now(:,:), xyzw_nxt(:,:)
-    real(rk),allocatable     :: xyzq(:,:), pt_dist(:), xyz(:,:,:)
-    real(rk),allocatable     :: charge(:), dcharge(:)
+    real(rk),pointer         :: xyzw_now(:,:), xyzw_nxt(:,:)
+    real(rk),allocatable     :: xyzq(:,:), xyzg(:,:), pt_dist(:), xyz(:,:,:)
+    real(rk),allocatable     :: wgt_now(:), charge(:)
     real(ark),allocatable    :: rhomol(:), wrho(:,:), drho(:,:,:), rdm_sv(:)
     type(gam_structure)      :: mol
     type(mol_grid)           :: den_grid
@@ -55,8 +55,8 @@ program bader
     !
     call gamess_load_orbitals(file=trim(rdm_file), structure=mol)
 
-    allocate (atypes(mol%natoms), xyzq(4,mol%natoms), iwhr(mol%natoms))
-    allocate (charge(mol%natoms), dcharge(mol%natoms))
+    allocate (atypes(mol%natoms), xyzq(4,mol%natoms), xyzg(3,mol%natoms))
+    allocate (gatyp(mol%natoms), charge(mol%natoms))
 
     call gamess_report_nuclei(natom, xyzq, mol)
     do i = 1,mol%natoms
@@ -71,20 +71,28 @@ program bader
     !  Set up the grid
     !
     write(ofile,'("Setting up the molecular grid")')
+    ndum = 0
+    do i = 1,natom
+        if (atypes(i) == "X") then
+            write(ofile,'("Skipping dummy atom at index ",i3)') i
+        else
+            ndum = ndum + 1
+            gatyp(ndum) = atypes(i)
+            xyzg(:,ndum) = xyzq(1:3,i)
+        end if
+    end do
     write(ofile,'("")')
-    call GridInitialize(den_grid, nrad, nang, xyzq(1:3,:), atypes)
+    call GridInitialize(den_grid, nrad, nang, xyzg(:,1:ndum), gatyp(1:ndum))
     call GridPointsBatch(den_grid, 'Batches count', count=nbatch)
     !!open(mfile, file='moldens', form='unformatted', action='write')
     !
     !  Set initial values
     !
-    norm = 0_rk
-    charge(:) = xyzq(4,:)
-    nullify(xyzw_lst, xyzw_now, xyzw_nxt)
+    nullify(xyzw_now, xyzw_nxt)
     call GridPointsBatch(den_grid, 'Next batch', xyzw=xyzw_now)
     npts = size(xyzw_now, dim=2)
     allocate (rhomol(npts), wrho(2,npts), drho(2,3,npts))
-    allocate (nnn(npts), nmask(7,npts), pt_dist(npts))
+    allocate (nnn(npts), nmask(7,npts), pt_dist(npts), wgt_now(npts))
     allocate (xyz(2,3,npts), asgn(2,npts), adone(2,npts))
     !
     !  Find nearest neighbours
@@ -113,6 +121,12 @@ program bader
     !  Molecular density numerical integration loop
     !
     write(ofile,'("Calculating molecular density")')
+    ! get density and gradients for the first shell
+    call evaluate_density_gradients(vectyp, rdm_count, npts, mol, rdm_sv, xyzw_now(1:3,:), rhomol, drho(2,:,:))
+    xyz(2,:,:) = xyzw_now(1:3,:)
+    wrho(2,:) = rhomol * xyzw_now(4,:)
+    norm = sum(wrho(2,:))
+    charge(:) = xyzq(4,:)
     asgn(:,:) = 0
     adone(:,:) = .false.
     first_shell = .true.
@@ -133,7 +147,7 @@ program bader
                 call GridPointsBatch(den_grid, 'Next batch', xyzw=xyzw_nxt)
 
                 ! check to see if the next shell is a different atom
-                avg_now = sum(xyzw_now(1:3,:), dim=2)
+                avg_now = sum(xyz(2,:,:), dim=2)
                 avg_nxt = sum(xyzw_nxt(1:3,:), dim=2)
                 dist = sqrt(sum((avg_nxt - avg_now)**2, dim=1))
                 if (dist > 0.2) then
@@ -142,8 +156,6 @@ program bader
                     ls = .false.
                 end if
             end if
-            xyz(1,:,:) = xyzw_lst(1:3,:)
-            xyz(2,:,:) = xyzw_now(1:3,:)
             !
             !  Evaluate density and density gradients at grid points
             !
@@ -151,7 +163,7 @@ program bader
             !
             !  Assign the densities for a set of two shells
             !
-            wrho(2,:) = rhomol * xyzw_now(4,:)
+            wrho(2,:) = rhomol * wgt_now(:)
             norm = norm + sum(wrho(2,:))
             call assign_shell(xyz, wrho, drho, asgn, adone, npts, xyzq, charge, natom, nmask, nnn, ls)
         end if
@@ -159,8 +171,9 @@ program bader
         !  Prepare the next shell
         !
         if (.not. last) then
-            xyzw_lst => xyzw_now
-            xyzw_now => xyzw_nxt
+            xyz(1,:,:) = xyz(2,:,:)
+            xyz(2,:,:) = xyzw_nxt(1:3,:)
+            wgt_now(:) = xyzw_nxt(4,:)
             wrho(1,:) = wrho(2,:)
             drho(1,:,:) = drho(2,:,:)
             asgn(1,:) = asgn(2,:)
@@ -340,7 +353,7 @@ subroutine evaluate_density_gradients(vtyp, rdm_count, npt, mol, rdm_sv, xyz, rh
     real(rk),intent(in)       :: xyz(3,npt)
     real(ark),intent(out)     :: rho(npt), drho(3,npt)
     !
-    integer(ik)               :: ipt, ird, imo, nmo, nbas
+    integer(ik)               :: ipt, ird, imo, ic, nmo, nbas
     real(ark),allocatable     :: basval(:,:,:)
     real(rk),allocatable      :: moval(:,:), dmoval(:,:,:)
 
@@ -371,12 +384,16 @@ subroutine evaluate_density_gradients(vtyp, rdm_count, npt, mol, rdm_sv, xyz, rh
             evaluate_rdm: do ird=1,rdm_count
                 imo = 2*ird - 1
                 rho = rho + rdm_sv(ird) * moval(imo,:) * moval(imo+1,:)
-                drho = drho + rdm_sv(ird) * dmoval(:,imo,:) * dmoval(:,imo+1,:)
+                do ic = 1, 3
+                    drho(ic,:) = drho(ic,:) + rdm_sv(ird) * (moval(imo,:) * dmoval(ic,imo+1,:) + moval(imo+1,:) * dmoval(ic,imo,:))
+                end do
             end do evaluate_rdm
         case ("natorb")
             evaluate_nat: do ird=1,rdm_count
                 rho = rho + rdm_sv(ird) * moval(ird,:)**2
-                drho = drho + rdm_sv(ird) * dmoval(:,ird,:)**2
+                do ic = 1, 3
+                    drho(ic,:) = drho(ic,:) + 2 * rdm_sv(ird) * moval(ird,:) * dmoval(ic,ird,:)
+                end do
             end do evaluate_nat
         case default
             write(out,'("evaluate_density: Unrecognized VEC type ",a8)') vtyp
@@ -405,29 +422,30 @@ subroutine assign_shell(xyz, wrho, drho, asgn, adone, npts, xyzq, atmchg, natm, 
     askip(:,:) = .false.
 
     make_assignments: do i = 1, npts
-        if (sqrt(sum(drho(1,:,i)**2)) < 1e-36) then
-            ! gradient is zero, skip it
-            adone(1,i) = .true.
-            print *,"skipping ",1,i
-        !else if (asgn(1,i) == 0) then
-        else if (.not. adone(1,i)) then
-            ! make assignments for inner shell
-            call assign_point(drho(1,:,i), xyz, npts, nrst(:,i), nnn(i), .false., iout(1,i), asgn(1,i))
-            print *,"assign",0,1,i,iout(1,i),asgn(1,i),adone(1,i),askip(1,i)
+        if (.not. adone(1,i)) then
+            if (sqrt(sum(drho(1,:,i)**2)) < 1e-36) then
+                ! gradient is zero, skip it
+                if (wrho(1,i) > 1e-36) write(out,'("WARNING: skipping zero gradient with density ",e12.4)') wrho(1,i)
+                adone(1,i) = .true.
+            else
+                ! make assignments for inner shell
+                call assign_point(drho(1,:,i), xyz, npts, nrst(:,i), nnn(i), .false., iout(1,i), asgn(1,i))
+            end if
         end if
 
-        din = xyz(1,:,i) - xyz(2,:,i)
-        if (sqrt(sum(drho(2,:,i)**2)) < 1e-36) then
-            ! gradient is zero, skip it
-            adone(2,i) = .true.
-            print *,"skipping ",2,i
-        else if (unit_dot(din, drho(2,:,i), 3) < 0 .and. .not. ls) then
-            ! gradient pointing out, come back after next shell is loaded
-            askip(2,i) = .true.
-        else
-            ! make assignments for outer shell
-            call assign_point(drho(2,:,i), xyz, npts, nrst(:,i), nnn(i), .true., iout(2,i), asgn(2,i))
-            print *,"assign",0,2,i,iout(2,i),asgn(2,i),adone(2,i),askip(2,i)
+        if (.not. adone(2,i)) then
+            din = xyz(1,:,i) - xyz(2,:,i)
+            if (sqrt(sum(drho(2,:,i)**2)) < 1e-36) then
+                ! gradient is zero, skip it
+                if (wrho(2,i) > 1e-36) write(out,'("WARNING: skipping zero gradient with density ",e12.4)') wrho(2,i)
+                adone(2,i) = .true.
+            else if (unit_dot(din, drho(2,:,i), 3) < 0 .and. .not. ls) then
+                ! gradient pointing out, come back after next shell is loaded
+                askip(2,i) = .true.
+            else
+                ! make assignments for outer shell
+                call assign_point(drho(2,:,i), xyz, npts, nrst(:,i), nnn(i), .true., iout(2,i), asgn(2,i))
+            end if
         end if
     end do make_assignments
 
@@ -437,7 +455,6 @@ subroutine assign_shell(xyz, wrho, drho, asgn, adone, npts, xyzq, atmchg, natm, 
             propagate_shell: do i = 1, npts
                 o_ji = iout(j,i)
                 a_ji = asgn(j,i)
-                print *,"before",k,j,i,iout(j,i),asgn(j,i),adone(j,i),askip(j,i)
                 if (adone(j,i) .or. askip(j,i)) cycle propagate_shell
                 o_next = iout(o_ji,a_ji)
                 a_next = asgn(o_ji,a_ji)
@@ -447,7 +464,7 @@ subroutine assign_shell(xyz, wrho, drho, asgn, adone, npts, xyzq, atmchg, natm, 
                         dist(n) = sqrt(sum((xyz(j,:,i) - xyzq(1:3,n))**2))
                     end do
                     iatm = minloc(dist, 1)
-                    !if (dist(iatm) > 0.5) then raise error?
+                    if (dist(iatm) > 1e-2) write(out,'("WARNING: maximum found ",e12.4," a0 from atom ",i3)') dist(iatm), iatm
                     asgn(j,i) = -iatm
                     asgn(o_ji,a_ji) = -iatm
                     atmchg(iatm) = atmchg(iatm) - wrho(j,i) - wrho(o_ji,a_ji)
@@ -474,21 +491,19 @@ subroutine assign_shell(xyz, wrho, drho, asgn, adone, npts, xyzq, atmchg, natm, 
                     iout(j,i) = o_next
                 end if
 
-                print *,"after ",k,j,i,iout(j,i),asgn(j,i),adone(j,i),askip(j,i)
-                print *,""
-                shell_done = shell_done .and. (adone(j,i) .or. askip(j,i))
+                !shell_done = shell_done .and. (adone(j,i) .or. askip(j,i))
             end do propagate_shell
         end do loop_shells
 
+        shell_done = all(adone .or. askip)
         if (shell_done) then
             ! all points going out or assigned to atoms
             exit propagate_assignments
         else if (k == maxitr) then
-            print *,"Shell assignments not finished in maximum number of iterations"
+            write(out,'("Shell assignments not finished in maximum number of iterations")')
             stop "propagate_assignments: Maximum iterations exceeded"
         end if
     end do propagate_assignments
-    print *,"Made it through one shell!"
 end subroutine assign_shell
 
 !
@@ -542,8 +557,9 @@ subroutine assign_point(idrho, xyz, npts, inrst, nni, outer, iiout, iasgn)
         end if
     end do other_shell
 
+
     if (vdotmx == -2) then
-        print *,"Assignment not found for current point"
+        write(out,'("Assignment not found for current point")')
         stop "assign_point: Assignment not found"
     end if
 
