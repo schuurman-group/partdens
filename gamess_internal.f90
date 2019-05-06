@@ -76,6 +76,7 @@
       integer(ik)          :: sh_p (gam_max_shells+1)   ! Index of the first primitive
       real(ark)            :: p_zet(gam_max_primitive)  ! Primitive exponents
       real(ark)            :: p_c  (gam_max_primitive)  ! Contraction coefficients
+      real(rk)             :: p_c_orig(gam_max_primitive)  ! Original, unscaled, non-normalised contraction coefficients
       !
       character(len=20)    :: ecp_name                  ! Name of the ECP
       real(ark)            :: ecp_zcore                 ! Number of electrons in the ECP

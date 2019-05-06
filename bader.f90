@@ -14,46 +14,60 @@ program bader
     use molecular_grid
     use atoms
     use atomdens
+    use fileio
     !
-    character(100),parameter :: infile="ddcharge.inp", outfile="ddcharge.out"
-    character(100)           :: rdm_file, vectyp, atyp, alib, wtyp, ityp
     character(2),allocatable :: atypes(:), gatyp(:)
     logical                  :: first_shell, last, ls
     logical,allocatable      :: adone(:,:)
-    integer(ik)              :: ofile, mfile
-    integer(ik)              :: i, ib, ipt, npts, nax
-    integer(ik)              :: rdm_count, natom, ndum, nbatch
-    integer(ik)              :: nrad, nang, narad, maxiter, iordr, maxchg
+    integer(ik)              :: ofile, mfile, nfile
+    integer(ik)              :: i, ib, ipt, npts, nax, iat
+    integer(ik)              :: nat_count, natom, ndum, nbatch
     integer(ik),allocatable  :: nnn(:), nmask(:,:), asgn(:,:)
-    real(rk)                 :: norm, tmp_rdm_sv(1000), thrsh, dist
-    real(rk)                 :: avg_now(3), avg_nxt(3)
+    real(rk)                 :: norm, tmp_nat_occ(1000)
     real(rk),pointer         :: xyzw_now(:,:), xyzw_nxt(:,:)
     real(rk),allocatable     :: xyzq(:,:), xyzg(:,:), pt_dist(:), xyz(:,:,:)
     real(rk),allocatable     :: wgt_now(:), charge(:)
-    real(ark),allocatable    :: rhomol(:), wrho(:,:), drho(:,:,:), rdm_sv(:)
+    real(ark),allocatable    :: rhomol(:,:), wrho(:,:), drho(:,:,:), nat_occ(:)
     type(gam_structure)      :: mol
     type(mol_grid)           :: den_grid
+    type(input_data)         :: inp
 
     call accuracyInitialize
 
     ofile=10
     mfile=11
+    nfile=12
 
-    open(ofile, file=outfile)
-    call read_input(infile, rdm_file, vectyp, nrad, nang, atyp, alib, narad, ityp, iordr, wtyp, maxchg, maxiter, thrsh)
-    call init_output(rdm_file, vectyp, nrad, nang, atyp, alib, narad, ityp, iordr, wtyp, maxchg, maxiter, thrsh)
+    open(ofile, file="bader.out")
+    call read_input(input, inp)
+    call init_gridchg_output(ofile, inp)
+    !call read_input(infile, nat_file, vectyp, nrad, nang, atyp, alib, narad, ityp, iordr, wtyp, maxchg, maxiter, thrsh)
+    !call init_output(nat_file, vectyp, nrad, nang, atyp, alib, narad, ityp, iordr, wtyp, maxchg, maxiter, thrsh)
 
-    write(ofile,'("Loading GAMESS RDM file")')
-    call gamess_load_rdmsv(trim(rdm_file), tmp_rdm_sv, rdm_count)
-    write(ofile,'("Found ",i4," singular values")') rdm_count
+    if (inp%weight_type /= "qtaim") then
+        write(out,'("Weight type ",a," not supported by bader.x")') trim(inp%weight_type)
+        stop "Bad weight type"
+    end if
+
+    write(ofile,'("Loading GAMESS data file")')
+    select case (inp%vec_type)
+        case ("tr1rdm")
+            call gamess_load_rdmsv(trim(inp%orb_fname), tmp_nat_occ, nat_count)
+        case ("natorb")
+            call gamess_load_natocc(trim(inp%orb_fname), tmp_nat_occ, nat_count)
+        case default
+            write(out,'("Unrecognized VEC type ",a8)') trim(inp%vec_type)
+            stop "bad VEC type"
+    end select
+    write(ofile,'("Found ",i4," natural occupations")') nat_count
     write(ofile,'("Values are:")')
-    write(ofile,'(5(1x,f12.8))') tmp_rdm_sv(:rdm_count)
+    write(ofile,'(5(1x,f12.8))') tmp_nat_occ(:nat_count)
     write(ofile,'("")')
     !
-    allocate (rdm_sv(rdm_count))
-    rdm_sv = tmp_rdm_sv(:rdm_count)
+    allocate (nat_occ(nat_count))
+    nat_occ = tmp_nat_occ(:nat_count)
     !
-    call gamess_load_orbitals(file=trim(rdm_file), structure=mol)
+    call gamess_load_orbitals(file=trim(inp%orb_fname), structure=mol)
 
     allocate (atypes(mol%natoms), xyzq(4,mol%natoms), xyzg(3,mol%natoms))
     allocate (gatyp(mol%natoms), charge(mol%natoms))
@@ -82,16 +96,16 @@ program bader
         end if
     end do
     write(ofile,'("")')
-    call GridInitialize(den_grid, nrad, nang, xyzg(:,1:ndum), gatyp(1:ndum))
+    call GridInitialize(den_grid, inp%n_rad, inp%n_ang, xyzg(:,1:ndum), gatyp(1:ndum))
     call GridPointsBatch(den_grid, 'Batches count', count=nbatch)
-    !!open(mfile, file='moldens', form='unformatted', action='write')
+    open(mfile, file='moldens', form='unformatted', action='write')
     !
     !  Set initial values
     !
     nullify(xyzw_now, xyzw_nxt)
     call GridPointsBatch(den_grid, 'Next batch', xyzw=xyzw_now)
     npts = size(xyzw_now, dim=2)
-    allocate (rhomol(npts), wrho(2,npts), drho(2,3,npts))
+    allocate (rhomol(2,npts), wrho(2,npts), drho(2,3,npts))
     allocate (nnn(npts), nmask(7,npts), pt_dist(npts), wgt_now(npts))
     allocate (xyz(2,3,npts), asgn(2,npts), adone(2,npts))
     !
@@ -99,7 +113,7 @@ program bader
     !
     write(ofile,'("Finding nearest neighbours in spherical grid")')
     write(ofile,'("")')
-    find_nearest: do ipt = 1, npts
+    find_nearest: do ipt = 1,npts
         nax = 0
         do i = 1, 3
             if (abs(xyzw_now(i,ipt)) < 1e-10) nax = nax + 1
@@ -122,16 +136,17 @@ program bader
     !
     write(ofile,'("Calculating molecular density")')
     ! get density and gradients for the first shell
-    call evaluate_density_gradients(vectyp, rdm_count, npts, mol, rdm_sv, xyzw_now(1:3,:), rhomol, drho(2,:,:))
+    call evaluate_density_gradients(inp%vec_type, nat_count, npts, mol, nat_occ, xyzw_now(1:3,:), rhomol(2,:), drho(2,:,:))
     xyz(2,:,:) = xyzw_now(1:3,:)
-    wrho(2,:) = rhomol * xyzw_now(4,:)
+    wrho(2,:) = rhomol(2,:) * xyzw_now(4,:)
     norm = sum(wrho(2,:))
     charge(:) = xyzq(4,:)
     asgn(:,:) = 0
     adone(:,:) = .false.
     first_shell = .true.
     last = .false.
-    mol_grid_batches: do ib = 1, nbatch-1
+    iat = den_grid%iatom
+    mol_grid_batches: do ib = 1,nbatch-1
         if (first_shell) then
             ! get next grid points
             call GridPointsBatch(den_grid, 'Next batch', xyzw=xyzw_nxt)
@@ -145,12 +160,8 @@ program bader
             else
                 ! get next grid points
                 call GridPointsBatch(den_grid, 'Next batch', xyzw=xyzw_nxt)
-
                 ! check to see if the next shell is a different atom
-                avg_now = sum(xyz(2,:,:), dim=2)
-                avg_nxt = sum(xyzw_nxt(1:3,:), dim=2)
-                dist = sqrt(sum((avg_nxt - avg_now)**2, dim=1))
-                if (dist > 0.2) then
+                if (iat /= den_grid%iatom) then
                     ls = .true.
                 else
                     ls = .false.
@@ -159,11 +170,11 @@ program bader
             !
             !  Evaluate density and density gradients at grid points
             !
-            call evaluate_density_gradients(vectyp, rdm_count, npts, mol, rdm_sv, xyz(2,:,:), rhomol, drho(2,:,:))
+            call evaluate_density_gradients(inp%vec_type, nat_count, npts, mol, nat_occ, xyz(2,:,:), rhomol(2,:), drho(2,:,:))
             !
             !  Assign the densities for a set of two shells
             !
-            wrho(2,:) = rhomol * wgt_now(:)
+            wrho(2,:) = rhomol(2,:) * wgt_now
             norm = norm + sum(wrho(2,:))
             call assign_shell(xyz, wrho, drho, asgn, adone, npts, xyzq, charge, natom, nmask, nnn, ls)
         end if
@@ -174,29 +185,72 @@ program bader
             xyz(1,:,:) = xyz(2,:,:)
             xyz(2,:,:) = xyzw_nxt(1:3,:)
             wgt_now(:) = xyzw_nxt(4,:)
+            rhomol(1,:) = rhomol(2,:)
             wrho(1,:) = wrho(2,:)
             drho(1,:,:) = drho(2,:,:)
             asgn(1,:) = asgn(2,:)
             asgn(2,:) = 0
             adone(1,:) = adone(2,:)
             adone(2,:) = .false.
+            iat = den_grid%iatom
             if (ls) then
                 first_shell = .true.
             end if
         end if
+        !
+        !  Integrate and save
+        !
+        rewind mfile
+        mol_integrate: do ipt = 1,npts
+            write(mfile) rhomol(1,ipt), asgn(1,ipt)
+        end do mol_integrate
+        call system("cat moldens snedlom > snedlom.tmp")
+        call system("mv snedlom.tmp snedlom")
     end do mol_grid_batches
-    !!close(mfile)
     write(ofile,'("Total molecular density: ",f14.8)') norm
     write(ofile,'("")')
     write(ofile,'("Total charge: ",f14.8)') sum(charge)
     write(ofile,'("Final charges:")')
     write(ofile,'("    ",5f14.8)') charge
-
+    ! write the last shell
+    rewind mfile
+    mol_integrate_last: do ipt = 1,npts
+        if (asgn(2,ipt) == 0) asgn(2,ipt) = -1
+        write(mfile) rhomol(2,ipt), -asgn(2,ipt)
+    end do mol_integrate_last
+    call system("cp moldens moldens.all")
+    !
+    !  Propagate assignments backwards
+    !
+    open(nfile, file='snedlom', form='unformatted', action='read')
+    propagate_back: do i = 1,nbatch-1
+        ! if any point isn't assigned to an atom, it must point outwards
+        read_rho: do ipt = 1,npts
+            read(nfile) rhomol(1,ipt), asgn(1,ipt)
+        end do read_rho
+        rewind mfile
+        prop_bk_shell: do ipt = 1,npts
+            if (asgn(1,ipt) > 0) then
+                asgn(1,ipt) = asgn(2,asgn(1,ipt))
+            else if (asgn(1,ipt) == 0) then
+                ! this should only happen if weight*density is zero
+                asgn(1,ipt) = -1
+            end if
+            write(mfile) rhomol(1,ipt), -asgn(1,ipt)
+        end do prop_bk_shell
+        call system("cat moldens moldens.all > moldens.tmp")
+        call system("mv moldens.tmp moldens.all")
+        rhomol(2,:) = rhomol(1,:)
+        asgn(2,:) = asgn(1,:)
+    end do propagate_back
+    call system("mv moldens.all moldens")
     !
     !  Clean up
     !
     call GridDestroy(den_grid)
-    !!close(mfile)
+    close(mfile)
+    close(nfile)
+    call system("rm snedlom")
     write(ofile,'("")')
     write(ofile,'("Exited successfully")')
 
@@ -204,118 +258,118 @@ program bader
 
 contains
 
+!!
+!!  Read a crude input file
+!!
+!subroutine read_input(infile, rfile, vtyp, nr, na, atyp, alib, nar, ityp, iord, wtyp, maxc, maxi, thr)
+!    character(100) :: infile, rfile, vtyp, atyp, alib, wtyp, ityp
+!    integer(ik)    :: nr, na, nar, maxi, iord, maxc
+!    real(rk)       :: thr
+!    !
+!    character(20)  :: varname, var
+!    integer(ik)    :: ios, nvar
 !
-!  Read a crude input file
+!    ios = 0
+!    nvar = 0
+!    open(22, file=infile)
+!    parse_input: do
+!        read(22,*,iostat=ios) varname, var
+!        if (ios /= 0) then
+!            exit parse_input
+!        end if
+!        select case (varname)
+!            case ("nat_filename")
+!                rfile = var
+!                nvar = nvar + 1
+!            case ("vec_type")
+!                vtyp = var
+!                nvar = nvar + 1
+!            case ("n_r_grid")
+!                read(var,*,iostat=ios) nr
+!                nvar = nvar + 1
+!            case ("n_ang_grid")
+!                read(var,*,iostat=ios) na
+!                nvar = nvar + 1
+!            case ("atom_type")
+!                atyp = var
+!                nvar = nvar + 1
+!            case ("atom_library")
+!                alib = var
+!                nvar = nvar + 1
+!            case ("n_r_atom")
+!                read(var,*,iostat=ios) nar
+!                nvar = nvar + 1
+!            case ("interp_type")
+!                ityp = var
+!                nvar = nvar + 1
+!            case ("interp_ord")
+!                read(var,*,iostat=ios) iord
+!                nvar = nvar + 1
+!            case ("weight_type")
+!                wtyp = var
+!                nvar = nvar + 1
+!            case ("max_charge")
+!                read(var,*,iostat=ios) maxc
+!                nvar = nvar + 1
+!            case ("max_iter")
+!                read(var,*,iostat=ios) maxi
+!                nvar = nvar + 1
+!            case ("chg_thresh")
+!                read(var,*,iostat=ios) thr
+!                nvar = nvar + 1
+!        end select
+!        if (ios /= 0) then
+!            write(ofile,'("read_input: Incorrect type for variable ",a)') varname
+!            stop "read_input - incorrect variable type"
+!        end if
+!    end do parse_input
+!    if (nvar < 13) then
+!        write(ofile,'("read_input: Missing variable")')
+!        stop "read_input - missing variable"
+!    end if
 !
-subroutine read_input(infile, rfile, vtyp, nr, na, atyp, alib, nar, ityp, iord, wtyp, maxc, maxi, thr)
-    character(100) :: infile, rfile, vtyp, atyp, alib, wtyp, ityp
-    integer(ik)    :: nr, na, nar, maxi, iord, maxc
-    real(rk)       :: thr
-    !
-    character(20)  :: varname, var
-    integer(ik)    :: ios, nvar
-
-    ios = 0
-    nvar = 0
-    open(22, file=infile)
-    parse_input: do
-        read(22,*,iostat=ios) varname, var
-        if (ios /= 0) then
-            exit parse_input
-        end if
-        select case (varname)
-            case ("rdm_filename")
-                rfile = var
-                nvar = nvar + 1
-            case ("vec_type")
-                vtyp = var
-                nvar = nvar + 1
-            case ("n_r_grid")
-                read(var,*,iostat=ios) nr
-                nvar = nvar + 1
-            case ("n_ang_grid")
-                read(var,*,iostat=ios) na
-                nvar = nvar + 1
-            case ("atom_type")
-                atyp = var
-                nvar = nvar + 1
-            case ("atom_library")
-                alib = var
-                nvar = nvar + 1
-            case ("n_r_atom")
-                read(var,*,iostat=ios) nar
-                nvar = nvar + 1
-            case ("interp_type")
-                ityp = var
-                nvar = nvar + 1
-            case ("interp_ord")
-                read(var,*,iostat=ios) iord
-                nvar = nvar + 1
-            case ("weight_type")
-                wtyp = var
-                nvar = nvar + 1
-            case ("max_charge")
-                read(var,*,iostat=ios) maxc
-                nvar = nvar + 1
-            case ("max_iter")
-                read(var,*,iostat=ios) maxi
-                nvar = nvar + 1
-            case ("chg_thresh")
-                read(var,*,iostat=ios) thr
-                nvar = nvar + 1
-        end select
-        if (ios /= 0) then
-            write(ofile,'("read_input: Incorrect type for variable ",a)') varname
-            stop "read_input - incorrect variable type"
-        end if
-    end do parse_input
-    if (nvar < 13) then
-        write(ofile,'("read_input: Missing variable")')
-        stop "read_input - missing variable"
-    end if
-
-end subroutine read_input
-
+!end subroutine read_input
 !
-!  Initialize the output file
+!!
+!!  Initialize the output file
+!!
+!subroutine init_output(rfile, vtyp, nr, na, atyp, alib, nar, ityp, iord, wtyp, maxc, maxi, thr)
+!    character(100) :: rfile, vtyp, atyp, alib, wtyp, ityp
+!    integer(ik)    :: nr, na, nar, maxi, iord, maxc
+!    real(rk)       :: thr
 !
-subroutine init_output(rfile, vtyp, nr, na, atyp, alib, nar, ityp, iord, wtyp, maxc, maxi, thr)
-    character(100) :: rfile, vtyp, atyp, alib, wtyp, ityp
-    integer(ik)    :: nr, na, nar, maxi, iord, maxc
-    real(rk)       :: thr
-
-    write(ofile,'("+--------------------------------------------------+")')
-    write(ofile,'("|                                                  |")')
-    write(ofile,'("|                     DDCharge                     |")')
-    write(ofile,'("|                                                  |")')
-    write(ofile,'("|    Deformation density partial atomic charges    |")')
-    write(ofile,'("|         RJ MacDonell, MS Schuurman 2018          |")')
-    write(ofile,'("+--------------------------------------------------+")')
-    write(ofile,'("")')
-    write(ofile,'("")')
-    write(ofile,'("Input summary:")')
-    write(ofile,'("    ------- Molecular density --------")')
-    write(ofile,'("    rdm_filename   =   ",a15)') trim(rfile)
-    write(ofile,'("    vec_type       =   ",a15)') trim(vtyp)
-    write(ofile,'("    n_r_grid       =   ",i15)') nr
-    write(ofile,'("    n_ang_grid     =   ",i15)') na
-    write(ofile,'("")')
-    write(ofile,'("    --------- Atomic density ---------")')
-    write(ofile,'("    atom_type      =   ",a15)') trim(atyp)
-    write(ofile,'("    atom_library   =   ",a15)') trim(alib)
-    write(ofile,'("    n_r_atom       =   ",i15)') nar
-    write(ofile,'("")')
-    write(ofile,'("    --------- Interpolation ----------")')
-    write(ofile,'("    interp_type    =   ",a15)') trim(ityp)
-    write(ofile,'("    interp_ord     =   ",i15)') iord
-    write(ofile,'("")')
-    write(ofile,'("    ------------- Charge -------------")')
-    write(ofile,'("    weight_type    =   ",a15)') trim(wtyp)
-    write(ofile,'("    max_charge     =   ",i15)') maxc
-    write(ofile,'("    max_iter       =   ",i15)') maxi
-    write(ofile,'("    chg_thresh     =   ",e15.3)') thr
-    write(ofile,'("")')
-end subroutine init_output
+!    write(ofile,'("+--------------------------------------------------+")')
+!    write(ofile,'("|                                                  |")')
+!    write(ofile,'("|                     DDCharge                     |")')
+!    write(ofile,'("|                                                  |")')
+!    write(ofile,'("|    Deformation density partial atomic charges    |")')
+!    write(ofile,'("|         RJ MacDonell, MS Schuurman 2018          |")')
+!    write(ofile,'("+--------------------------------------------------+")')
+!    write(ofile,'("")')
+!    write(ofile,'("")')
+!    write(ofile,'("Input summary:")')
+!    write(ofile,'("    ------- Molecular density --------")')
+!    write(ofile,'("    nat_filename   =   ",a15)') trim(rfile)
+!    write(ofile,'("    vec_type       =   ",a15)') trim(vtyp)
+!    write(ofile,'("    n_r_grid       =   ",i15)') nr
+!    write(ofile,'("    n_ang_grid     =   ",i15)') na
+!    write(ofile,'("")')
+!    write(ofile,'("    --------- Atomic density ---------")')
+!    write(ofile,'("    atom_type      =   ",a15)') trim(atyp)
+!    write(ofile,'("    atom_library   =   ",a15)') trim(alib)
+!    write(ofile,'("    n_r_atom       =   ",i15)') nar
+!    write(ofile,'("")')
+!    write(ofile,'("    --------- Interpolation ----------")')
+!    write(ofile,'("    interp_type    =   ",a15)') trim(ityp)
+!    write(ofile,'("    interp_ord     =   ",i15)') iord
+!    write(ofile,'("")')
+!    write(ofile,'("    ------------- Charge -------------")')
+!    write(ofile,'("    weight_type    =   ",a15)') trim(wtyp)
+!    write(ofile,'("    max_charge     =   ",i15)') maxc
+!    write(ofile,'("    max_iter       =   ",i15)') maxi
+!    write(ofile,'("    chg_thresh     =   ",e15.3)') thr
+!    write(ofile,'("")')
+!end subroutine init_output
 
 !
 !  Find the indices of the smallest n elements of a list the slow way
@@ -345,11 +399,11 @@ end function argslow
 !
 !  Determine the molecular density and gradients at XYZ coordinates
 !
-subroutine evaluate_density_gradients(vtyp, rdm_count, npt, mol, rdm_sv, xyz, rho, drho)
-    character(100),intent(in) :: vtyp
-    integer(ik),intent(in)    :: rdm_count, npt
+subroutine evaluate_density_gradients(vtyp, nat_count, npt, mol, nat_occ, xyz, rho, drho)
+    character(6),intent(in) :: vtyp
+    integer(ik),intent(in)    :: nat_count, npt
     type(gam_structure),intent(inout)   :: mol
-    real(rk),intent(in)       :: rdm_sv(rdm_count)
+    real(rk),intent(in)       :: nat_occ(nat_count)
     real(rk),intent(in)       :: xyz(3,npt)
     real(ark),intent(out)     :: rho(npt), drho(3,npt)
     !
@@ -381,18 +435,18 @@ subroutine evaluate_density_gradients(vtyp, rdm_count, npt, mol, rdm_sv, xyz, rh
     drho = 0_ark
     select case (vtyp)
         case ("tr1rdm")
-            evaluate_rdm: do ird=1,rdm_count
+            evaluate_rdm: do ird=1,nat_count
                 imo = 2*ird - 1
-                rho = rho + rdm_sv(ird) * moval(imo,:) * moval(imo+1,:)
+                rho = rho + nat_occ(ird) * moval(imo,:) * moval(imo+1,:)
                 do ic = 1, 3
-                    drho(ic,:) = drho(ic,:) + rdm_sv(ird) * (moval(imo,:) * dmoval(ic,imo+1,:) + moval(imo+1,:) * dmoval(ic,imo,:))
+                    drho(ic,:) = drho(ic,:) + nat_occ(ird) * (moval(imo,:) * dmoval(ic,imo+1,:) + moval(imo+1,:) * dmoval(ic,imo,:))
                 end do
             end do evaluate_rdm
         case ("natorb")
-            evaluate_nat: do ird=1,rdm_count
-                rho = rho + rdm_sv(ird) * moval(ird,:)**2
+            evaluate_nat: do ird=1,nat_count
+                rho = rho + nat_occ(ird) * moval(ird,:)**2
                 do ic = 1, 3
-                    drho(ic,:) = drho(ic,:) + 2 * rdm_sv(ird) * moval(ird,:) * dmoval(ic,ird,:)
+                    drho(ic,:) = drho(ic,:) + 2 * nat_occ(ird) * moval(ird,:) * dmoval(ic,ird,:)
                 end do
             end do evaluate_nat
         case default
@@ -414,7 +468,7 @@ subroutine assign_shell(xyz, wrho, drho, asgn, adone, npts, xyzq, atmchg, natm, 
     logical               :: adone(2,npts), ls
     !
     integer(ik)           :: i, j, k, n, iout(2,npts), o_ji, a_ji, o_next, a_next, iatm
-    integer(ik),parameter :: maxitr=12
+    integer(ik),parameter :: maxitr=120
     real(rk)              :: dist(natm), din(3)
     logical               :: shell_done, askip(2,npts)
 
@@ -453,23 +507,63 @@ subroutine assign_shell(xyz, wrho, drho, asgn, adone, npts, xyzq, atmchg, natm, 
         shell_done = .true.
         loop_shells: do j = 1, 2
             propagate_shell: do i = 1, npts
+                if (adone(j,i) .or. askip(j,i)) cycle propagate_shell
                 o_ji = iout(j,i)
                 a_ji = asgn(j,i)
-                if (adone(j,i) .or. askip(j,i)) cycle propagate_shell
                 o_next = iout(o_ji,a_ji)
                 a_next = asgn(o_ji,a_ji)
                 if (o_next == j .and. a_next == i) then
-                    ! repetition, add both to nearest atom density
-                    do n = 1, natm
-                        dist(n) = sqrt(sum((xyz(j,:,i) - xyzq(1:3,n))**2))
-                    end do
-                    iatm = minloc(dist, 1)
-                    if (dist(iatm) > 1e-2) write(out,'("WARNING: maximum found ",e12.4," a0 from atom ",i3)') dist(iatm), iatm
-                    asgn(j,i) = -iatm
-                    asgn(o_ji,a_ji) = -iatm
-                    atmchg(iatm) = atmchg(iatm) - wrho(j,i) - wrho(o_ji,a_ji)
-                    adone(j,i) = .true.
-                    adone(o_ji,a_ji) = .true.
+                    ! repetition
+                    ! try to assign to the same point as a neighbour
+                    chk_nbours0: do n = 2, nnn(i)
+                        if (asgn(j,nrst(n,i)) < 0) then
+                            iatm = -asgn(j,nrst(n,i))
+                            asgn(j,i) = -iatm
+                            atmchg(iatm) = atmchg(iatm) - wrho(j,i)
+                            adone(j,i) = .true.
+                            exit chk_nbours0
+                        else if (asgn(3-j,nrst(n,i)) < 0) then
+                            iatm = -asgn(3-j,nrst(n,i))
+                            asgn(j,i) = -iatm
+                            atmchg(iatm) = atmchg(iatm) - wrho(j,i)
+                            adone(j,i) = .true.
+                            exit chk_nbours0
+                        end if
+                    end do chk_nbours0
+                    chk_nbours1: do n = 1, nnn(a_ji)
+                        if (asgn(o_ji,nrst(n,a_ji)) < 0) then
+                            iatm = -asgn(o_ji,nrst(n,a_ji))
+                            asgn(o_ji,a_ji) = -iatm
+                            atmchg(iatm) = atmchg(iatm) - wrho(o_ji,a_ji)
+                            adone(o_ji,a_ji) = .true.
+                            exit chk_nbours1
+                        else if (asgn(3-o_ji,nrst(n,a_ji)) < 0) then
+                            iatm = -asgn(3-o_ji,nrst(n,a_ji))
+                            asgn(o_ji,a_ji) = -iatm
+                            atmchg(iatm) = atmchg(iatm) - wrho(o_ji,a_ji)
+                            adone(o_ji,a_ji) = .true.
+                            exit chk_nbours1
+                        end if
+                    end do chk_nbours1
+                    ! otherwise assign to the nearest nucleus
+                    if (.not. adone(j,i)) then
+                        do n = 1, natm
+                            dist(n) = sqrt(sum((xyz(j,:,i) - xyzq(1:3,n))**2))
+                        end do
+                        iatm = minloc(dist, 1)
+                        asgn(j,i) = -iatm
+                        atmchg(iatm) = atmchg(iatm) - wrho(j,i)
+                        adone(j,i) = .true.
+                    end if
+                    if (.not. adone(o_ji,a_ji)) then
+                        do n = 1, natm
+                            dist(n) = sqrt(sum((xyz(o_ji,:,a_ji) - xyzq(1:3,n))**2))
+                        end do
+                        iatm = minloc(dist, 1)
+                        atmchg(iatm) = atmchg(iatm) - wrho(o_ji,a_ji)
+                        asgn(o_ji,a_ji) = -iatm
+                        adone(o_ji,a_ji) = .true.
+                    end if
                 else if (a_next == 0) then
                     if (j == 1) then
                         ! pointed-to index out but not assigned, add to density (caching would happen here)
@@ -559,6 +653,7 @@ subroutine assign_point(idrho, xyz, npts, inrst, nni, outer, iiout, iasgn)
 
 
     if (vdotmx == -2) then
+        print *,"drho = ",idrho
         write(out,'("Assignment not found for current point")')
         stop "assign_point: Assignment not found"
     end if
@@ -582,5 +677,19 @@ function unit_dot(u, v, nd)
     norm_v = sqrt(sum(v**2))
     unit_dot = sum((u * v) / (norm_u * norm_v))
 end function unit_dot
+
+!
+!  Evaluate the vector v minus its projection on a vector u
+!
+function projout(u, v, nd)
+    integer(ik) :: nd
+    real(rk)    :: u(nd), v(nd), projout(nd)
+    !
+    real(rk)    :: udotv, vdotv
+
+    udotv = sum(u * v)
+    vdotv = sum(v**2)
+    projout = u - (udotv/vdotv) * v
+end function projout
 
 end program bader

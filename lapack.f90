@@ -12,6 +12,10 @@ module lapack
     module procedure lapack_dgelss
   end interface ! lapack_gelss
 
+  interface lapack_posv
+    module procedure lapack_dposv
+  end interface ! lapack_posv
+
   interface lapack_stev
     module procedure lapack_sstev
     module procedure lapack_dstev
@@ -140,6 +144,25 @@ module lapack
       stop 'lapack_dgelss - dgelss failed'
     end if
   end subroutine lapack_dgelss
+
+  subroutine lapack_dposv(a,b)
+    double precision, intent(inout) :: a(:,:) ! In:  Left hand side matrix A in AX = B
+                                              ! Out: Cholesky factor L
+    double precision, intent(inout) :: b(:,:) ! In:  Right hand side matrix B in AX = B
+                                              ! Out: Solution matrix X
+    external dposv
+    integer                         :: info
+    integer                         :: na1, na2, nb1, nb2
+
+    na1 = size(a,dim=1) ; na2 = size(a,dim=2)
+    nb1 = size(b,dim=1) ; nb2 = size(b,dim=2)
+    call dposv('L', na1, nb2, a, na2, b, nb1, info)
+
+    if (info/=0) then
+      write (out,"(' dposv returned',i8)") info
+      stop 'lapack_dposv - dposv failed'
+    end if
+  end subroutine lapack_dposv
 
   subroutine lapack_sstev(d,e,z)
     real, intent(inout) :: d(:)   ! In:  Diagonal elements of the matrix 

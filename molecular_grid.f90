@@ -54,7 +54,7 @@
       !
       !  Position of the next point batch within the grid. We always return an entire angular shell
       !
-      integer(ik)                    :: iatom
+      integer(ik), public            :: iatom
       integer(ik)                    :: irad
       !$ integer(OMP_LOCK_KIND)      :: update_lock   ! Lock must be acquired before modifying iatom, irad
       !

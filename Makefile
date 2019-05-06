@@ -1,7 +1,9 @@
 goal: makefile.dep
 	make bader.x
-	make ddcharge.x
+	make gridchg.x
 	make sphatom.x
+	make nci.x
+	make nat_ibo.x
 
 MAKEFLAGS = -r
 
@@ -54,6 +56,8 @@ LIBFC += atoms.o
 LIBFC += lebedev.o
 LIBFC += molecular_grid.o
 LIBFC += atomdens.o
+LIBFC += fileio.o
+LIBFC += molden.o
 
 #
 # Building the binaries
@@ -61,11 +65,17 @@ LIBFC += atomdens.o
 bader.x: bader.o $(LIBFC)
 	$(F90) -o bader.x bader.o $(LIBFC) $(LIBS)
 
-ddcharge.x: ddcharge.o $(LIBFC)
-	$(F90) -o ddcharge.x ddcharge.o $(LIBFC) $(LIBS)
+gridchg.x: gridchg.o $(LIBFC)
+	$(F90) -o gridchg.x gridchg.o $(LIBFC) $(LIBS)
 
 sphatom.x: sphatom.o $(LIBFC)
 	$(F90) -o sphatom.x sphatom.o $(LIBFC) $(LIBS)
+
+nci.x: nci.o $(LIBFC)
+	$(F90) -o nci.x nci.o $(LIBFC) $(LIBS)
+
+nat_ibo.x: nat_ibo.o $(LIBFC)
+	$(F90) -o nat_ibo.x nat_ibo.o $(LIBFC) $(LIBS)
 
 #
 # Automatically-generated dependencies

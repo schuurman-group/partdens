@@ -56,6 +56,7 @@
     private
 !   public os_basic_integral     ! Debugging!
     public gamess_load_orbitals
+    public gamess_reload_basis
     public gamess_evaluate_functions
     public gamess_load_natocc
     public gamess_load_rdmsv
@@ -351,6 +352,102 @@
         deallocate (gam%vectors)
       end if
     end subroutine gamess_load_orbitals
+    !
+    !  Load a different set of AOs from an external basis file
+    !
+    subroutine gamess_reload_basis(file,basname,structure)
+      character(len=*), intent(in), optional :: file            ! Name of the GAMESS extbas file
+      character(len=*), intent(in), optional :: basname         ! Name of the external basis to be read
+      type(gam_structure), intent(inout), target, optional &
+                                             :: structure       ! Context to use
+      !
+      type(gam_structure), pointer :: gam
+      integer(ik)                  :: iat, ish, ios, alloc
+      !
+      if (present(structure)) then
+        gam => structure
+      else
+        gam => gam_def
+      end if
+      !
+      !  Make sure atoms are present
+      !
+      if (.not.allocated(gam%atoms) .or. .not.allocated(gam%vectors)) then
+        write (out,"('import_gamess%gamess_reload_basis: basis set and/or orbitals are not present')")
+        stop 'import_gamess%gamess_reload_basis: basis set and/or orbitals are not present'
+      end if
+      if (gam%natoms==0) then
+        stop 'import_gamess%reload_basis - Found no atoms!'
+      end if
+      !
+      !  Remove information other than atoms
+      !
+      if (allocated(gam%bas_labels)) then
+        deallocate(gam%bas_labels,stat=alloc)
+        if (alloc/=0) then
+          write (out,"('gamess_import%gamess_reload_basis: Error ',i6,' deallocating basis labels table')") alloc
+          stop 'gamess_import%gamess_reload_basis: Error deallocating basis labels table'
+        end if
+      end if
+      if (allocated(gam%vectors)) then
+        deallocate(gam%vectors,stat=alloc)
+        if (alloc/=0) then
+          write (out,"('gamess_import%gamess_reload_basis: Error ',i6,' deallocating vectors table')") alloc
+          stop 'gamess_import%gamess_reload_basis: Error deallocating vectors table'
+        end if
+      end if
+      if (allocated(gam%batches)) then
+        deallocate(gam%batches,stat=alloc)
+        if (alloc/=0) then
+          write (out,"('gamess_import%gamess_reload_basis: Error ',i6,' deallocating batches table')") alloc
+          stop 'gamess_import%gamess_reload_basis: Error deallocating batches table'
+        end if
+      end if
+      gam%nvectors = 0
+      gam%nbatches = 0
+      !
+      !  Find and load the atomic basis for each atom
+      !
+      open (gam_file,file=file,action='read',position='rewind',status='old',iostat=ios)
+      if (ios/=0) then
+        write (out,"('import_gamess%gamess_reload_basis - error ',i8,' opening ',a)") ios, trim(file)
+        stop 'import_gamess%gamess_reload_basis - nofile'
+      end if
+      load_atoms: do iat=1,gam%natoms
+        if (gam%atoms(iat)%znuc > 0.5) then
+          call parse_extbas(gam%atoms(iat),basname)
+          rewind (gam_file)
+        else
+          ! remove dummy atom basis functions
+          gam%atoms(iat)%nshell  = 0
+          gam%atoms(iat)%sh_p(1) = 1
+        end if
+      end do load_atoms
+      close (gam_file,iostat=ios)
+      !
+      !  Count basis functions and contractions
+      !
+      gam%nbasis = 0
+      gam%max_contractions = 0
+      count_basis: do iat=1,gam%natoms
+        count_shells: do ish=1,gam%atoms(iat)%nshell
+          gam%nbasis = gam%nbasis + gam_orbcnt(gam%atoms(iat)%sh_l(ish))
+          gam%max_contractions = max(gam%max_contractions,gam%atoms(iat)%sh_p(ish+1)-gam%atoms(iat)%sh_p(ish))
+        end do count_shells
+      end do count_basis
+      if (verbose>=0) then
+        write (out,"('import_gamess: Found ',i8,' Cartesian basis functions')") gam%nbasis
+        write (out,"('import_gamess: Longest contraction has ',i8,' primitives')") gam%max_contractions
+      end if
+      !
+      !  Count batches, may be needed for 2e integrals
+      !
+      call count_2e_batches(gam)
+      !
+      !  Label basis functions, in case anybody cares
+      !
+      call label_basis_set(gam)
+    end subroutine gamess_reload_basis
     !
     !  Evaluate basis functions and their gradients on grid
     !
@@ -1284,6 +1381,10 @@
             stop 'import_gamess%parse_one_atom - primitive read'
           end if
           !
+          ! Save a copy of the original contraction coefficients
+          !
+          atom%p_c_orig(pprim)=atom%p_c(pprim)
+          !
           !  Rescale contraction coefficient to include primitive normalization factor
           !
           atom%p_c(pprim) = atom%p_c(pprim) * primitive_norm(atom%sh_l(atom%nshell),atom%p_zet(pprim))
@@ -1444,6 +1545,119 @@
         write (out,"()")
       end if
     end subroutine parse_one_ecp
+    !
+    subroutine parse_extbas(atom,basname)
+      type(gam_atom), intent(out)  :: atom
+      character(len=*), intent(in) :: basname
+      !
+      integer(ik)       :: ios
+      character(len=20) :: lcode, sstr
+      integer(ik)       :: idum
+      integer(ik)       :: nprim, ip, pprim, sh, pl, pu, ip1, ip2
+      real(ark)         :: norm
+      logical           :: have_basis
+      !
+      !  Find basis set for atom
+      !
+      write (sstr,"(a,' ',a)") adjustl(trim(atom%name)), trim(basname)
+      write (out,"('import_gamess: Loading external basis ',a)") trim(sstr)
+      scan_lines: do while (.not.have_basis)
+        call gam_readline
+        if (line_buf==trim(sstr)) have_basis = .true.
+      end do scan_lines
+      if (.not.have_basis) then
+        write (out,"('import_gamess%parse_extbas: External basis ',a,' not found for atom ',a)") trim(basname), trim(atom%name)
+        stop 'import_gamess%parse_extbas - external basis not found'
+      end if
+      !
+      !  Basis set lines
+      !
+      atom%nshell  = 0 ;
+      atom%sh_p(1) = 1 ;
+      read_shells: do
+        call gam_readline ; call echo(1_ik)
+        if (line_buf==' ') exit read_shells ! End of atom data
+        read (line_buf,*,iostat=ios) lcode, nprim
+        if (ios/=0) then
+          write (out,"('import_gamess%parse_extbas: Error ',i8,' parsing line:'/1x,a)") ios, trim(line_buf)
+          stop 'import_gamess%parse_extbas - lcode read'
+        end if
+        !
+        if (nprim>GAM_MAX_CONTRACTION) then
+          write (out,"('import_gamess%parse_extbas: too many primitives at line ',a)") trim(line_buf)
+          write (out,"('import_gamess%parse_extbas: increase GAM_MAX_CONTRACTION and recompile')")
+          stop 'import_gamess%parse_extbas - too many contractions'
+        end if
+        !
+        atom%nshell = atom%nshell + 1
+        if (atom%nshell>=GAM_MAX_SHELLS) then
+          write (out,"('import_gamess%parse_extbas: too many shells at line ',a)") trim(line_buf)
+          stop 'import_gamess%parse_extbas - too many shells'
+        end if
+        !
+        select case (lcode)
+          case default
+            write (out,"('import_gamess%parse_extbas: lcode ',a,' is not recognized')") trim(line_buf)
+            stop 'import_gamess%parse_extbas - bad lcode'
+          case ('S') ; atom%sh_l(atom%nshell) = 0
+          case ('P') ; atom%sh_l(atom%nshell) = 1
+          case ('D') ; atom%sh_l(atom%nshell) = 2
+          case ('F') ; atom%sh_l(atom%nshell) = 3
+          case ('G') ; atom%sh_l(atom%nshell) = 4
+        end select
+        !
+        pprim = atom%sh_p(atom%nshell)
+        read_contractions: do ip=1,nprim
+          call gam_readline ; call echo(1_ik)
+          if (pprim>=GAM_MAX_PRIMITIVE) then
+          write (out,"('import_gamess%parse_extbas: too many primitives at line ',a)") trim(line_buf)
+            stop 'import_gamess%parse_extbas - too many primitives'
+          end if
+          read (line_buf,*,iostat=ios) idum, atom%p_zet(pprim),atom%p_c(pprim)
+          if (ios/=0) then
+            write (out,"('import_gamess%parse_extbas: Error ',i8,' parsing line:'/1x,a)") &
+                   ios, trim(line_buf)
+            stop 'import_gamess%parse_extbas - primitive read'
+          end if
+          !
+          ! Save a copy of the original contraction coefficients
+          !
+          atom%p_c_orig(pprim)=atom%p_c(pprim)
+          !
+          !  Rescale contraction coefficient to include primitive normalization factor
+          !
+          atom%p_c(pprim) = atom%p_c(pprim) * primitive_norm(atom%sh_l(atom%nshell),atom%p_zet(pprim))
+          ! write (out,*) 'ip = ', ip, ' pprim = ', pprim, ' zeta = ', atom%p_zet(pprim), ' c = ', atom%p_c(pprim)
+          pprim = pprim + 1
+        end do read_contractions
+        !
+        atom%sh_p(atom%nshell+1) = pprim ;
+      end do read_shells
+      !
+      !  Check normalization of each shell, and renormalize if needed.
+      !
+      renormalize: do sh=1,atom%nshell
+        pl   = atom%sh_p(sh)
+        pu   = atom%sh_p(sh+1) - 1
+        norm = 0._ark
+        left: do ip1=pl,pu
+          right: do ip2=pl,pu
+            norm = norm + atom%p_c(ip1) * atom%p_c(ip2) &
+                    / (atom%p_zet(ip1)+atom%p_zet(ip2))**(1.5_ark+atom%sh_l(sh))
+          end do right
+        end do left
+        norm = norm * (pi**1.5_ark)*gam_normc(atom%sh_l(sh))
+        !
+        if ( (verbose>=0) .and. (abs(norm-1.0_ark)>1e-6_ark) ) then
+          write (out,"('import_gamess: Shell ',i4,' lval = ',i2,' with ',i4,' primitives, norm = ',g20.12)") &
+                 sh, atom%sh_l(sh), pu-pl+1, norm
+        end if
+        !
+        !  Renormalize
+        !
+        atom%p_c(pl:pu) = atom%p_c(pl:pu) / sqrt(norm)
+      end do renormalize
+    end subroutine parse_extbas
     !
     subroutine parse_orbital_data(gam)
       type(gam_structure), intent(inout) :: gam
