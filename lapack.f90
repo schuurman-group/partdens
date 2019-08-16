@@ -16,6 +16,10 @@ module lapack
     module procedure lapack_dposv
   end interface ! lapack_posv
 
+  interface lapack_sysv
+    module procedure lapack_dsysv
+  end interface ! lapack_dsysv
+
   interface lapack_stev
     module procedure lapack_sstev
     module procedure lapack_dstev
@@ -163,6 +167,27 @@ module lapack
       stop 'lapack_dposv - dposv failed'
     end if
   end subroutine lapack_dposv
+
+  subroutine lapack_dsysv(a,b)
+    double precision, intent(inout) :: a(:,:) ! In:  Left hand side matrix A in AX = B
+                                              ! Out: Cholesky factor L
+    double precision, intent(inout) :: b(:,:) ! In:  Right hand side matrix B in AX = B
+                                              ! Out: Solution matrix X
+    external dsysv
+    integer                         :: lwork, info, ipiv(max(1,2*size(a,dim=2)))
+    integer                         :: na1, na2, nb1, nb2
+    double precision                :: work(max(1,2*size(a,dim=2)))
+
+    na1 = size(a,dim=1) ; na2 = size(a,dim=2)
+    nb1 = size(b,dim=1) ; nb2 = size(b,dim=2)
+    lwork = max(1,2*na2)
+    call dsysv('L', na1, nb2, a, na2, ipiv, b, nb1, work, lwork, info)
+
+    if (info/=0) then
+      write (out,"(' dsysv returned',i8)") info
+      stop 'lapack_dsysv - dsysv failed'
+    end if
+  end subroutine lapack_dsysv
 
   subroutine lapack_sstev(d,e,z)
     real, intent(inout) :: d(:)   ! In:  Diagonal elements of the matrix 

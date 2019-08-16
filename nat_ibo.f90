@@ -31,7 +31,7 @@ program ibocalc
     call accuracyInitialize
 
     ofile = 10
-    extbas = '/home/rymac/Projects/PartialCharge/extbas'
+    extbas = '/globalhome/rymac/Projects/PartialCharge/extbas'
 
     localize_virt = .false.
     pwr = 2

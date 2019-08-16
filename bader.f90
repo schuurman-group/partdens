@@ -1,11 +1,15 @@
 !
-!  The (hopefully temporary) Bader charge algorithm
+!  The (hopefully temporary) Bader QTAIM charge algorithm
 !
 !  Calculates charges from a GAMESS RDM output file using the Bader
 !  atoms-in-molecules algorithm which requires density gradients. This
 !  can potentially be added to the DDCharge code if there is a good way
 !  to cache unassigned points (i.e. save x, y, z, w and rho and propagate
 !  the assignment until assigned).
+!
+!  For now, QTAIM deformation densities are calculated by gridchg.x after
+!  running bader.x with inp%atom_type = pro. This is done by back-propagating
+!  assignments and saving the results in a binary file.
 !
 program bader
     use accuracy
@@ -19,7 +23,7 @@ program bader
     character(2),allocatable :: atypes(:), gatyp(:)
     logical                  :: first_shell, last, ls
     logical,allocatable      :: adone(:,:)
-    integer(ik)              :: ofile, mfile, nfile
+    integer(ik)              :: ofile, mfile, nfile, pfile
     integer(ik)              :: i, ib, ipt, npts, nax, iat
     integer(ik)              :: nat_count, natom, ndum, nbatch
     integer(ik),allocatable  :: nnn(:), nmask(:,:), asgn(:,:)
@@ -37,6 +41,7 @@ program bader
     ofile=10
     mfile=11
     nfile=12
+    pfile=13
 
     open(ofile, file="bader.out")
     call read_input(input, inp)
@@ -46,7 +51,7 @@ program bader
 
     if (inp%weight_type /= "qtaim") then
         write(out,'("Weight type ",a," not supported by bader.x")') trim(inp%weight_type)
-        stop "Bad weight type"
+        stop "bad weight type"
     end if
 
     write(ofile,'("Loading GAMESS data file")')
@@ -99,6 +104,7 @@ program bader
     call GridInitialize(den_grid, inp%n_rad, inp%n_ang, xyzg(:,1:ndum), gatyp(1:ndum))
     call GridPointsBatch(den_grid, 'Batches count', count=nbatch)
     open(mfile, file='moldens', form='unformatted', action='write')
+    open(pfile, file='dens.mol', action='write')
     !
     !  Set initial values
     !
@@ -203,6 +209,7 @@ program bader
         rewind mfile
         mol_integrate: do ipt = 1,npts
             write(mfile) rhomol(1,ipt), asgn(1,ipt)
+            write(pfile,1000) wgt_now(ipt), xyz(1,:,ipt), rhomol(1,ipt)
         end do mol_integrate
         call system("cat moldens snedlom > snedlom.tmp")
         call system("mv snedlom.tmp snedlom")
@@ -217,6 +224,7 @@ program bader
     mol_integrate_last: do ipt = 1,npts
         if (asgn(2,ipt) == 0) asgn(2,ipt) = -1
         write(mfile) rhomol(2,ipt), -asgn(2,ipt)
+        write(pfile,1000) xyzw_nxt(4,ipt), xyz(2,:,ipt), rhomol(2,ipt)
     end do mol_integrate_last
     call system("cp moldens moldens.all")
     !
@@ -250,126 +258,18 @@ program bader
     call GridDestroy(den_grid)
     close(mfile)
     close(nfile)
+    close(pfile)
     call system("rm snedlom")
+    if (trim(inp%atom_type) == "pop") then
+        call system("rm moldens")
+    end if
     write(ofile,'("")')
     write(ofile,'("Exited successfully")')
+    close(ofile)
 
     1000 format(e24.8,f16.8,f16.8,f16.8,e20.10)
 
 contains
-
-!!
-!!  Read a crude input file
-!!
-!subroutine read_input(infile, rfile, vtyp, nr, na, atyp, alib, nar, ityp, iord, wtyp, maxc, maxi, thr)
-!    character(100) :: infile, rfile, vtyp, atyp, alib, wtyp, ityp
-!    integer(ik)    :: nr, na, nar, maxi, iord, maxc
-!    real(rk)       :: thr
-!    !
-!    character(20)  :: varname, var
-!    integer(ik)    :: ios, nvar
-!
-!    ios = 0
-!    nvar = 0
-!    open(22, file=infile)
-!    parse_input: do
-!        read(22,*,iostat=ios) varname, var
-!        if (ios /= 0) then
-!            exit parse_input
-!        end if
-!        select case (varname)
-!            case ("nat_filename")
-!                rfile = var
-!                nvar = nvar + 1
-!            case ("vec_type")
-!                vtyp = var
-!                nvar = nvar + 1
-!            case ("n_r_grid")
-!                read(var,*,iostat=ios) nr
-!                nvar = nvar + 1
-!            case ("n_ang_grid")
-!                read(var,*,iostat=ios) na
-!                nvar = nvar + 1
-!            case ("atom_type")
-!                atyp = var
-!                nvar = nvar + 1
-!            case ("atom_library")
-!                alib = var
-!                nvar = nvar + 1
-!            case ("n_r_atom")
-!                read(var,*,iostat=ios) nar
-!                nvar = nvar + 1
-!            case ("interp_type")
-!                ityp = var
-!                nvar = nvar + 1
-!            case ("interp_ord")
-!                read(var,*,iostat=ios) iord
-!                nvar = nvar + 1
-!            case ("weight_type")
-!                wtyp = var
-!                nvar = nvar + 1
-!            case ("max_charge")
-!                read(var,*,iostat=ios) maxc
-!                nvar = nvar + 1
-!            case ("max_iter")
-!                read(var,*,iostat=ios) maxi
-!                nvar = nvar + 1
-!            case ("chg_thresh")
-!                read(var,*,iostat=ios) thr
-!                nvar = nvar + 1
-!        end select
-!        if (ios /= 0) then
-!            write(ofile,'("read_input: Incorrect type for variable ",a)') varname
-!            stop "read_input - incorrect variable type"
-!        end if
-!    end do parse_input
-!    if (nvar < 13) then
-!        write(ofile,'("read_input: Missing variable")')
-!        stop "read_input - missing variable"
-!    end if
-!
-!end subroutine read_input
-!
-!!
-!!  Initialize the output file
-!!
-!subroutine init_output(rfile, vtyp, nr, na, atyp, alib, nar, ityp, iord, wtyp, maxc, maxi, thr)
-!    character(100) :: rfile, vtyp, atyp, alib, wtyp, ityp
-!    integer(ik)    :: nr, na, nar, maxi, iord, maxc
-!    real(rk)       :: thr
-!
-!    write(ofile,'("+--------------------------------------------------+")')
-!    write(ofile,'("|                                                  |")')
-!    write(ofile,'("|                     DDCharge                     |")')
-!    write(ofile,'("|                                                  |")')
-!    write(ofile,'("|    Deformation density partial atomic charges    |")')
-!    write(ofile,'("|         RJ MacDonell, MS Schuurman 2018          |")')
-!    write(ofile,'("+--------------------------------------------------+")')
-!    write(ofile,'("")')
-!    write(ofile,'("")')
-!    write(ofile,'("Input summary:")')
-!    write(ofile,'("    ------- Molecular density --------")')
-!    write(ofile,'("    nat_filename   =   ",a15)') trim(rfile)
-!    write(ofile,'("    vec_type       =   ",a15)') trim(vtyp)
-!    write(ofile,'("    n_r_grid       =   ",i15)') nr
-!    write(ofile,'("    n_ang_grid     =   ",i15)') na
-!    write(ofile,'("")')
-!    write(ofile,'("    --------- Atomic density ---------")')
-!    write(ofile,'("    atom_type      =   ",a15)') trim(atyp)
-!    write(ofile,'("    atom_library   =   ",a15)') trim(alib)
-!    write(ofile,'("    n_r_atom       =   ",i15)') nar
-!    write(ofile,'("")')
-!    write(ofile,'("    --------- Interpolation ----------")')
-!    write(ofile,'("    interp_type    =   ",a15)') trim(ityp)
-!    write(ofile,'("    interp_ord     =   ",i15)') iord
-!    write(ofile,'("")')
-!    write(ofile,'("    ------------- Charge -------------")')
-!    write(ofile,'("    weight_type    =   ",a15)') trim(wtyp)
-!    write(ofile,'("    max_charge     =   ",i15)') maxc
-!    write(ofile,'("    max_iter       =   ",i15)') maxi
-!    write(ofile,'("    chg_thresh     =   ",e15.3)') thr
-!    write(ofile,'("")')
-!end subroutine init_output
 
 !
 !  Find the indices of the smallest n elements of a list the slow way

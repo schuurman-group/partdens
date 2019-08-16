@@ -1,5 +1,5 @@
 CC  = gcc -Wall -m64 -march=k8 -msse3 -mfpmath=sse -O3
-F90 = ifort -warn -nofor_main -ipo -O3 -no-prec-div -openmp -assume cc_omp -complex_limited_range \
+F90 = ifort -warn -nofor_main -ipo -O3 -no-prec-div -qopenmp -assume cc_omp -complex_limited_range \
             -debug extended -traceback
 F90L = $(F90)
 LAPACK = -mkl=sequential

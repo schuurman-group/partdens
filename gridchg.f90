@@ -19,7 +19,7 @@ program gridchg
     character(20)            :: pname, wname
     character(2),allocatable :: atypes(:)
     logical,allocatable      :: aload(:,:)
-    integer(ik)              :: ofile, mfile, pfile, wfile
+    integer(ik)              :: ofile, mfile, pfile, qfile, wfile
     integer(ik)              :: i, ib, ipt, iter, npts, iat
     integer(ik)              :: nat_count, natom, nbatch, nuniq, norb
     integer(ik),allocatable  :: iwhr(:), qlist(:)
@@ -38,7 +38,8 @@ program gridchg
     ofile=10
     mfile=11
     pfile=12
-    wfile=13
+    qfile=13
+    wfile=14
 
     open(ofile, file="gridchg.out")
     call read_input(input, inp)
@@ -87,6 +88,7 @@ program gridchg
     if (trim(inp%weight_type) /= "qtaim") then
         write(ofile,'("Calculating molecular density")')
         open(mfile, file='moldens', form='unformatted', action='write')
+        open(pfile, file='dens.mol', action='write')
         norm = 0_rk
         nullify(xyzw)
         mol_grid_batches: do ib = 1,nbatch
@@ -113,11 +115,14 @@ program gridchg
             mol_integrate: do ipt = 1,npts
                 norm = norm + xyzw(4,ipt) * rhomol(ipt)
                 write(mfile) rhomol(ipt)
+                write(pfile,1000) xyzw(4,ipt), xyzw(1:3,ipt), rhomol(ipt)
             end do mol_integrate
         end do mol_grid_batches
         close(mfile)
+        close(pfile)
         write(ofile,'("Total molecular density: ",f14.8)') norm
         write(ofile,'("")')
+        deallocate (rhomol)
     end if
 
     !
@@ -144,16 +149,16 @@ program gridchg
     iterate_chg: do iter = 1,inp%max_iter
         if (inp%atom_type == "pro") write(ofile,'("ITER = "i4)') iter
         if (iter < 10) then
-            write(pname,'("density.",i1)') iter
-            write(wname,'("weights.",i1)') iter
+            write(pname,'("dens.atm.",i1)') iter
+            write(wname,'("wgts.atm.",i1)') iter
         else if (iter < 100) then
-            write(pname,'("density.",i2)') iter
-            write(wname,'("weights.",i2)') iter
+            write(pname,'("dens.atm.",i2)') iter
+            write(wname,'("wgts.atm.",i2)') iter
         else
-            write(pname,'("density.",i3)') iter
-            write(wname,'("weights.",i3)') iter
+            write(pname,'("dens.atm.",i3)') iter
+            write(wname,'("wgts.atm.",i3)') iter
         end if
-        open(pfile, file=trim(pname), action='write')
+        open(qfile, file=trim(pname), action='write')
         open(wfile, file=trim(wname), action='write')
         rewind mfile
         !
@@ -176,15 +181,9 @@ program gridchg
             !
             npts = size(xyzw, dim=2)
             if (allocated(rhopro)) then
-                if (size(rhomol) /= npts) deallocate (rhomol)
-                if (size(rhopro) /= npts) deallocate (rhopro)
-                if (size(rhoatm,2) /= npts) deallocate (rhoatm)
-                if (size(awgt,2) /= npts) deallocate (awgt)
+                if (size(rhomol) /= npts) deallocate (rhomol, rhopro, rhoatm, awgt)
             end if
-            if (.not. allocated(rhomol)) allocate (rhomol(npts))
-            if (.not. allocated(rhopro)) allocate (rhopro(npts))
-            if (.not. allocated(rhoatm)) allocate (rhoatm(natom,npts))
-            if (.not. allocated(awgt)) allocate (awgt(natom,npts))
+            if (.not. allocated(rhomol)) allocate (rhomol(npts),rhopro(npts),rhoatm(natom,npts),awgt(natom,npts))
             !
             !  Evaluate atomic densities at grid points if necessary
             !
@@ -215,7 +214,7 @@ program gridchg
                     dcharge(i) = dcharge(i) + sum(awgt(i,:) * xyzw(4,:) * (rhopro - rhomol))
                 end do atom_contrib_pro
                 integrate_pro: do ipt = 1,npts
-                    write(pfile,1000) xyzw(4,ipt), xyzw(1:3,ipt), rhomol(ipt)-rhopro(ipt)
+                    write(qfile,'(*(e16.8))') rhoatm(:,ipt)
                     write(wfile,'(*(e16.8))') awgt(:,ipt)
                 end do integrate_pro
             else
@@ -223,14 +222,13 @@ program gridchg
                     dcharge(i) = dcharge(i) - sum(awgt(i,:) * xyzw(4,:) * rhomol)
                 end do atom_contrib_pop
                 integrate_pop: do ipt = 1,npts
-                    write(pfile,1000) xyzw(4,ipt), xyzw(1:3,ipt), rhomol(ipt)
                     write(wfile,'(*(e16.8))') awgt(:,ipt)
                 end do integrate_pop
             end if
             ! get iatom for the next shell
             iat = den_grid%iatom
         end do grid_batches
-        close(pfile)
+        close(qfile)
         close(wfile)
         charge = charge + dcharge
 
@@ -269,11 +267,12 @@ program gridchg
     close(mfile)
     call system("rm moldens")
     ! only keep data from the last iteration
-    call system("mv "//pname//" density.dat")
-    call system("mv "//wname//" weights.dat")
-    call system("rm -f density.[0-9]* weights.[0-9]*")
+    call system("mv "//pname//" dens.atm")
+    call system("mv "//wname//" wgts.atm")
+    call system("rm -f dens.atm.[0-9]* wgts.atm.[0-9]*")
     write(ofile,'("")')
     write(ofile,'("Exited successfully")')
+    close(ofile)
 
     1000 format(e24.8,f16.8,f16.8,f16.8,e20.10)
 

@@ -4,6 +4,7 @@ goal: makefile.dep
 	make sphatom.x
 	make nci.x
 	make nat_ibo.x
+	make newton.x
 
 MAKEFLAGS = -r
 
@@ -76,6 +77,9 @@ nci.x: nci.o $(LIBFC)
 
 nat_ibo.x: nat_ibo.o $(LIBFC)
 	$(F90) -o nat_ibo.x nat_ibo.o $(LIBFC) $(LIBS)
+
+newton.x: newton.o $(LIBFC)
+	$(F90) -o newton.x newton.o $(LIBFC) $(LIBS)
 
 #
 # Automatically-generated dependencies
