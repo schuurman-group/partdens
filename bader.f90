@@ -151,7 +151,7 @@ program bader
     adone(:,:) = .false.
     first_shell = .true.
     last = .false.
-    iat = den_grid%iatom
+    iat = den_grid%next_part
     mol_grid_batches: do ib = 1,nbatch-1
         if (first_shell) then
             ! get next grid points
@@ -167,7 +167,7 @@ program bader
                 ! get next grid points
                 call GridPointsBatch(den_grid, 'Next batch', xyzw=xyzw_nxt)
                 ! check to see if the next shell is a different atom
-                if (iat /= den_grid%iatom) then
+                if (iat /= den_grid%next_part) then
                     ls = .true.
                 else
                     ls = .false.
@@ -198,7 +198,7 @@ program bader
             asgn(2,:) = 0
             adone(1,:) = adone(2,:)
             adone(2,:) = .false.
-            iat = den_grid%iatom
+            iat = den_grid%next_part
             if (ls) then
                 first_shell = .true.
             end if

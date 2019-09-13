@@ -26,9 +26,9 @@ module timer
   private
   public TimerStart, TimerStop, TimerReport
 !
-  integer, parameter :: trk        = selected_real_kind(14)
-  integer, parameter :: table_size = 1000 ! Max number of entries to track
-  integer, parameter :: name_len   =   40 ! Max length of timer name
+  integer, parameter     :: trk        = selected_real_kind(14)  ! Must be of default integer kind
+  integer(ik), parameter :: table_size = 1000 ! Max number of entries to track
+  integer(ik), parameter :: name_len   =   40 ! Max length of timer name
 !
   type tim
     logical                 :: used       ! Slot used?
@@ -258,13 +258,14 @@ module timer
         if (count_bad_cpu >0) write (out,"(t5,'  CPU-time ordering violations = ',f16.0)") count_bad_cpu
       end if
       write (out,"()")
+      call flush(out)
     end subroutine TimerReport
   !
   !  Support routines
   !
     logical function omp_secondary()
     !$ use OMP_LIB
-      integer :: this_thread
+      integer :: this_thread  ! Must be of default integer kind
       !
       this_thread = 0
       !$ this_thread = omp_get_thread_num()
@@ -281,9 +282,9 @@ module timer
     function get_real_time() result(t)
       real(trk) :: t
       !
-      integer         :: count, count_rate, count_max
+      integer         :: count, count_rate, count_max ! Must be of default integer kind
       real(trk), save :: overflow   =  0
-      integer, save   :: last_count = -1
+      integer, save   :: last_count = -1   ! Must be of default integer kind
       real(trk), save :: last_time  = -1   ! Initialize to an impossible small value
       !
       call system_clock(count,count_rate,count_max)
@@ -399,6 +400,9 @@ module timer
       end do search
       !
     end function insert_item
+    !
+    !  Function below must use at least 29-bit integers. We'll stick
+    !  to the default kind.
     !
     integer function string_hash(str) result(h)
       character(len=*), intent(in) :: str

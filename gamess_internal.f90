@@ -3,30 +3,41 @@
 !  and data files. This module is tightly coupled to import_gamess and
 !  ecp_gamess. It should not be directly relied upon by anything else.
 !
+!  We will keep everything here is extended precision; routines requiring
+!  lower precision must typecast all constants at the point of use.
+!  The only exception are the molecular orbitals - these are kept in
+!  "high" precision - our input files do not provide more in any event
+!
+!  In order to maintain computational costs under control for routines
+!  which do not need high precision, we'll also keep a copy of the
+!  frequently-used terms in standard precision.
+!
  module gamess_internal
    use accuracy
    implicit none
    public
    !
     integer(ik), parameter :: gam_file            = 57    ! A semi-randomly chosen unit
-    integer(ik), parameter :: gam_max_line        = 128
+    integer(ik), parameter :: gam_max_line        = 192
     integer(ik), parameter :: gam_max_shells      = 600
     integer(ik), parameter :: gam_max_ecp_terms   = 100
     integer(ik), parameter :: gam_max_primitive   = 2000
     integer(ik), parameter :: gam_max_atoms       = 1000
     integer(ik), parameter :: gam_max_contraction = 50
+    integer(ik), parameter :: gam_max_batch_size  = 60 ! Split up very long batches; otherwise, memory requirements 
+                                                       ! become -very- large
     integer(ik), parameter :: gam_orbcnt(0:4)   = (/ 1, 3, 6, 10, 15 /)
-    real(ark), parameter   :: gam_normc (0:4)   = (/ 1._ark, 1._ark/2._ark, 3._ark/4._ark, 15._ark/8._ark, 105._ark/16._ark /)
+    real(xrk), parameter   :: gam_normc (0:4)   = (/ 1._xrk, 1._xrk/2._xrk, 3._xrk/4._xrk, 15._xrk/8._xrk, 105._xrk/16._xrk /)
     !
     !  Definition of the angular parts of GAMESS basis functions
     ! 
-    real(ark), parameter   :: a = 1.7320508075688772935274463415058723669428_ark ! sqrt( 3.0)
-    real(ark), parameter   :: b = 2.2360679774997896964091736687312762354406_ark ! sqrt( 5.0)
-    real(ark), parameter   :: c = 3.8729833462074168851792653997823996108329_ark ! sqrt(15.0)
-    real(ark), parameter   :: d = 2.6457513110645905905016157536392604257102_ark ! sqrt( 7.0)
-    real(ark), parameter   :: e = 3.4156502553198661277403462268403506635783_ark ! sqrt(35.0/3.0)
-    real(ark), parameter   :: f = 5.9160797830996160425673282915616170484155_ark ! sqrt(35.0)
-    real(ark), parameter   :: o = 1._ark
+    real(xrk), parameter   :: a = 1.7320508075688772935274463415058723669428_xrk ! sqrt( 3.0)
+    real(xrk), parameter   :: b = 2.2360679774997896964091736687312762354406_xrk ! sqrt( 5.0)
+    real(xrk), parameter   :: c = 3.8729833462074168851792653997823996108329_xrk ! sqrt(15.0)
+    real(xrk), parameter   :: d = 2.6457513110645905905016157536392604257102_xrk ! sqrt( 7.0)
+    real(xrk), parameter   :: e = 3.4156502553198661277403462268403506635783_xrk ! sqrt(35.0/3.0)
+    real(xrk), parameter   :: f = 5.9160797830996160425673282915616170484155_xrk ! sqrt(35.0)
+    real(xrk), parameter   :: o = 1._xrk
     integer(ik), parameter :: ang_loc(0:5) = (/ 0, 1, 4, 10, 20, 35 /)
                                              !                      1                   2                   3
                                              !  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4
@@ -37,7 +48,10 @@
     integer(ik), parameter :: ang_nx(0:34) = (/ 0,1,0,0,2,0,0,1,1,0,3,0,0,2,2,1,0,1,0,1,4,0,0,3,3,1,0,1,0,2,2,0,2,1,1/)
     integer(ik), parameter :: ang_ny(0:34) = (/ 0,0,1,0,0,2,0,1,0,1,0,3,0,1,0,2,2,0,1,1,0,4,0,1,0,3,3,0,1,2,0,2,1,2,1/)
     integer(ik), parameter :: ang_nz(0:34) = (/ 0,0,0,1,0,0,2,0,1,1,0,0,3,0,1,0,1,2,2,1,0,0,4,0,1,0,1,3,3,0,2,2,1,1,2/)
-    real(ark), parameter   :: ang_c (0:34) = (/ o,o,o,o,o,o,o,a,a,a,o,o,o,b,b,b,b,b,b,c,o,o,o,d,d,d,d,d,d,e,e,e,f,f,f/)
+    real(xrk), parameter   :: ang_c (0:34) = (/ o,o,o,o,o,o,o,a,a,a,o,o,o,b,b,b,b,b,b,c,o,o,o,d,d,d,d,d,d,e,e,e,f,f,f/)
+    real(rk), parameter    :: ang_c_rk(0:34) = real( &
+                                             (/ o,o,o,o,o,o,o,a,a,a,o,o,o,b,b,b,b,b,b,c,o,o,o,d,d,d,d,d,d,e,e,e,f,f,f/), &
+                                               kind=rk)
     integer(ik), parameter :: ang_nxyz(0:34,3) = reshape((/ang_nx,ang_ny,ang_nz/),(/35,3/))
     !
     character(len=1), parameter :: shell_name(0:4) = (/ 'S', 'P', 'D', 'F', 'G' /)
@@ -67,27 +81,30 @@
     integer(ik), parameter :: drop_xyz(0:34,3) = reshape((/drop_x,drop_y,drop_z/),(/35,3/))
     !
     type gam_atom
-      character(len=20)    :: name                      ! Name of the atom
-      real(ark)            :: znuc                      ! Effective nuclear charge. In the case of an ECP, this charge
-                                                        ! gives the asymptotic long-range potential of this nucleus
-      real(ark)            :: xyz(3)                    ! Coordinates, in Angstrom
-      integer(ik)          :: nshell                    ! Number of contracted shells
-      integer(ik)          :: sh_l (gam_max_shells)     ! Per-shell angular momentum
-      integer(ik)          :: sh_p (gam_max_shells+1)   ! Index of the first primitive
-      real(ark)            :: p_zet(gam_max_primitive)  ! Primitive exponents
-      real(ark)            :: p_c  (gam_max_primitive)  ! Contraction coefficients
+      character(len=20)    :: name                         ! Name of the atom
+      real(xrk)            :: znuc                         ! Effective nuclear charge. In the case of an ECP, this charge
+                                                           ! gives the asymptotic long-range potential of this nucleus
+      real(xrk)            :: xyz(3)                       ! Coordinates, in Angstrom
+      real(rk)             :: xyz_rk(3)                    ! ditto, standard real
+      integer(ik)          :: nshell                       ! Number of contracted shells
+      integer(ik)          :: sh_l    (gam_max_shells)     ! Per-shell angular momentum
+      integer(ik)          :: sh_p    (gam_max_shells+1)   ! Index of the first primitive
+      real(xrk)            :: p_zet   (gam_max_primitive)  ! Primitive exponents
+      real(rk)             :: p_zet_rk(gam_max_primitive)  ! ditto, standard real
+      real(xrk)            :: p_c     (gam_max_primitive)  ! Contraction coefficients
       real(rk)             :: p_c_orig(gam_max_primitive)  ! Original, unscaled, non-normalised contraction coefficients
+      real(rk)             :: p_c_rk  (gam_max_primitive)  ! ditto, standard real
       !
-      character(len=20)    :: ecp_name                  ! Name of the ECP
-      real(ark)            :: ecp_zcore                 ! Number of electrons in the ECP
-      integer(ik)          :: ecp_lmaxp1                ! LMAX+1 for this ECP
-      integer(ik)          :: ecp_nterms                ! Number of distinct Gaussians in the ECP
-      integer(ik)          :: ecp_l(gam_max_ecp_terms)  ! Angular momentum of each projector. Negative
-                                                        ! value means a universal contribution, applicable
-                                                        ! to all channels.
-      integer(ik)          :: ecp_n(gam_max_ecp_terms)  ! Power of r in an ECP term, plus 2
-      real(ark)            :: ecp_c(gam_max_ecp_terms)  ! Weight of the Gaussian term
-      real(ark)            :: ecp_d(gam_max_ecp_terms)  ! Exponent of the Gaussian term
+      character(len=20)    :: ecp_name                     ! Name of the ECP
+      real(xrk)            :: ecp_zcore                    ! Number of electrons in the ECP
+      integer(ik)          :: ecp_lmaxp1                   ! LMAX+1 for this ECP
+      integer(ik)          :: ecp_nterms                   ! Number of distinct Gaussians in the ECP
+      integer(ik)          :: ecp_l(gam_max_ecp_terms)     ! Angular momentum of each projector. Negative
+                                                           ! value means a universal contribution, applicable
+                                                           ! to all channels.
+      integer(ik)          :: ecp_n(gam_max_ecp_terms)     ! Power of r in an ECP term, plus 2
+      real(xrk)            :: ecp_c(gam_max_ecp_terms)     ! Weight of the Gaussian term
+      real(xrk)            :: ecp_d(gam_max_ecp_terms)     ! Exponent of the Gaussian term
     end type gam_atom
     !
     type gam_structure
@@ -96,8 +113,9 @@
       integer(ik)                    :: nvectors = 0          ! Number of vectors in this set
       type(gam_atom), allocatable    :: atoms(:)              ! Table of atoms
       character(len=11), allocatable :: bas_labels(:)         ! Basis labels
-      real(ark), allocatable         :: vectors(:,:)          ! Molecular orbitals
-      real(ark)                      :: rotmat(3,3)           ! Rotation matrix for this structure
+      real(rk), allocatable          :: vectors(:,:)          ! Molecular orbitals
+      real(xrk)                      :: rotmat(3,3)           ! Rotation matrix for this structure
+      real(rk)                       :: rotmat_rk(3,3)        ! ditto, standard precision
       real(rk)                       :: dx(3)                 ! Grid spacing for oversampling.
                                                               ! All-negative input disables oversampling.
       !
@@ -126,11 +144,14 @@
     !
     type gam_operator_data
       character(len=20)              :: op_name               ! Name of the operator
-      real(ark)                      :: op_xyz(3)             ! Operator-carrying centre
-      real(ark)                      :: omega                 ! exponent of the exp(-omega*r**2) factor
-      real(ark)                      :: imag_rc               ! Imaginary part of op_xyz (see os_basic_integral)
-      real(ark)                      :: kvec(3)               ! Used by planewave operator
+      real(xrk)                      :: op_xyz(3)             ! Operator-carrying centre, in Bohr
+      real(xrk)                      :: omega                 ! exponent of the exp(-omega*r**2) factor
+      real(xrk)                      :: imag_rc               ! Imaginary part of op_xyz (see os_basic_integral)
+      real(xrk)                      :: kvec(3)               ! Used by planewave operator
+      integer(ik)                    :: op_i, op_j            ! Additional indices, used by 'r-d/dr' operator
     end type gam_operator_data
+    !
+    character(len=GAM_MAX_LINE)      :: gam_line_buf          ! Line buffer for reading GAMESS files
     !
     contains
     !
@@ -138,20 +159,20 @@
     !
     !    z**l exp(-zeta*r**2)
     !
-    real(ark) function primitive_norm(l,z)
+    real(xrk) function primitive_norm(l,z)
       integer(ik), intent(in) :: l ! Angular momentum
-      real(ark), intent(in)   :: z ! Orbital exponent
+      real(xrk), intent(in)   :: z ! Orbital exponent
       !
-      primitive_norm =  sqrt( (2*z)**(1.5_rk+l) / (gam_normc(l)*pi**1.5_ark) ) ;
+      primitive_norm =  sqrt( (2*z)**(1.5_xrk+l) / (gam_normc(l)*pi_xrk**1.5_xrk) ) ;
     end function primitive_norm
     !
     !  Expectation of r for a normalized primitive
     !
-    real(ark) function primitive_r_expectation(l,z)
+    real(xrk) function primitive_r_expectation(l,z)
       integer(ik), intent(in) :: l ! Angular momentum
-      real(ark), intent(in)   :: z ! Orbital exponent
+      real(xrk), intent(in)   :: z ! Orbital exponent
       !
-      primitive_r_expectation = (1.5_rk+l)/z
+      primitive_r_expectation = (1.5_xrk+l)/z
     end function primitive_r_expectation
     !
     !  Generate basis function names
@@ -221,7 +242,7 @@
       type(gam_atom), intent(in) :: at  ! Atom to report
       !
       integer(ik) :: is, sh_l, p1, pn, ip
-      real(ark)   :: norm
+      real(xrk)   :: norm
       !
       write (iu,"(1x,a11,1x,f10.6,1x,3(1x,f14.8))") trim(at%name), at%znuc, at%xyz
       print_shells: do is=1,at%nshell
@@ -231,13 +252,13 @@
         write (iu,"(a1,1x,i4)") shell_name(sh_l), pn-p1+1
         print_primitives: do ip=p1,pn
           norm = primitive_norm(sh_l,at%p_zet(ip))
-          write (iu,"(i3,1x,g14.7,2x,g14.7)") ip-p1+1, at%p_zet(ip), at%p_c(ip)/norm
+          write (iu,"(i3,1x,g44.34,2x,g44.34)") ip-p1+1, at%p_zet(ip), at%p_c(ip)/norm
         end do print_primitives
       end do print_shells
       write (iu,"()")
     end subroutine print_one_atom
     !
-    !  Punch one vector in restart format
+    !  Punch one vector in GAMESS-US restart format
     !
     subroutine punch_vector(iu,imo,vec)
       integer(ik), intent(in) :: iu     ! I/O unit
@@ -256,5 +277,43 @@
         line = line + 1
       end do punch_line
     end subroutine punch_vector
+    !
+    !  Punch one vector in our spin-orbit restart format
+    !  Since we are breaking GAMESS-US format anyways, we'll also
+    !  store more significant digits.
+    !
+    subroutine punch_vector_complex(iu,imo,vec)
+      integer(ik), intent(in) :: iu     ! I/O unit
+      integer(ik), intent(in) :: imo    ! Identifying index
+      complex(rk), intent(in) :: vec(:) ! Vector to punch
+      !
+      integer(ik) :: ibas, tbas, line
+      complex(rk) :: buf(4)
+      !
+      line = 1
+      punch_line: do ibas=1,size(vec),4
+        tbas = min(size(vec),ibas+3)
+        buf = 0._rk
+        buf(1:tbas-ibas+1) = vec(ibas:tbas)
+        write (iu,"(i2,i3,8e20.13)") mod(imo,100), line, buf
+        line = line + 1
+      end do punch_line
+    end subroutine punch_vector_complex
+
+    subroutine gam_readline(eof)
+      logical, intent(out), optional :: eof
+      integer(ik)                    :: ios
+      !
+      if (present(eof)) eof = .false.
+      read (gam_file,"(a)",iostat=ios) gam_line_buf
+      if (ios<0 .and. present(eof)) then
+        eof = .true.
+      else
+        if (ios/=0) then
+          write (out,"('gamess_internal%gam_readline: error ',i8,' reading .dat file')") ios
+          stop 'gamess_internal%gam_readline - Read error'
+        end if
+      end if
+    end subroutine gam_readline
 
  end module gamess_internal

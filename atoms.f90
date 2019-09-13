@@ -141,8 +141,6 @@
       character(len=*), intent(in) :: atom ! Element symbol
       real(rk)                     :: q    ! Nuclear charge, in |e| units
       !
-      integer(ik) :: ind
-      !
       q = find_atom(atom)
     end function AtomNuclearCharge
     !
@@ -167,7 +165,7 @@
       integer(ik)                  :: ind  ! Index in elements, or -1 if not found
       !
       character(len=3) :: la
-      integer          :: ia
+      integer          :: ia    ! Must be of default integer kind - iachar has problems otherwise
       !
       la = atom
       !
