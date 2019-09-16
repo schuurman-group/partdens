@@ -6,9 +6,9 @@
 !     real(ark), intent(in)                :: z_l(:)  ! Primitive exponents on the left
 !     real(ark), intent(in)                :: c_l(:)  ! Contractions on the left
 !     real(ark), intent(in)                :: r_r(:)  ! Ditto on the right
-!     integer(ik), intent(in)              :: l_r     ! 
-!     real(ark), intent(in)                :: z_r(:)  ! 
-!     real(ark), intent(in)                :: c_r(:)  ! 
+!     integer(ik), intent(in)              :: l_r     !
+!     real(ark), intent(in)                :: z_r(:)  !
+!     real(ark), intent(in)                :: c_r(:)  !
       !
       integer(ik)                 :: ic_l, p1_l, p2_l, p_l, int_l
       integer(ik)                 :: ic_r, p1_r, p2_r, p_r, int_r

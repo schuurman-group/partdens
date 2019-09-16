@@ -5,7 +5,7 @@
 !     real(ark), intent(in)    :: r_l(:)                      ! Centre of the left b.f.
 !     real(ark), intent(in)    :: z_l                         ! Orbital exponent of the left b.f.
 !     real(ark), intent(in)    :: r_r(:)                      ! ditto, for the right b.f.
-!     real(ark), intent(in)    :: z_r                         ! 
+!     real(ark), intent(in)    :: z_r                         !
 !     !
       real(kind(z_l)) :: zeta, p(3), c(3), s00, s, t
       integer(ik)     :: l_l, l_r                            ! "Angular momentum" on the the left and right

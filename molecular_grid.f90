@@ -3,7 +3,7 @@
 !  * 2013 Apr 26 - Added support for ring singularity of a square-root type.
 !
 !  Simple non-uniform spatial grid, used for evaluating integrals of bound
-!  orbitals and densities numerically. 
+!  orbitals and densities numerically.
 !
 !  The implementation essentially follows:
 !
@@ -14,7 +14,7 @@
 !  enough for small systems, and is accurate enough.
 !
 !  The routines in this module are intended for "disposable" single-use
-!  grids. If the same grid is used multiple times, consider adding 
+!  grids. If the same grid is used multiple times, consider adding
 !  caching of the integration points and weights - perhaps using an
 !  external file.
 !
@@ -34,7 +34,7 @@
     public GridInitialize, GridDestroy, GridPointsBatch
     !
     integer(ik), parameter     :: step_order = 3      ! There does not seem to be a good reason to change this one
-    logical, parameter         :: randomize  = .true. ! Randomize orientation of the spherical shell; should give more
+    logical, parameter         :: randomize  = .false.! Randomize orientation of the spherical shell; should give more
                                                       ! accurate, but non-deterministic results
     !
     !  Radial grid type is used to cache integration points and weights on a
@@ -81,13 +81,14 @@
                                                       ! 'Outer' - an outer-shell partition, for integrating CAPs
       integer(ik), allocatable       :: p_shells(:)   ! Number of shells per partition; the actual definition of a shell
                                                       ! is partition-specific
-      integer(ik), allocatable       :: p_shellsz(:)  ! Shell size within each partition (so we assume that partitions are made 
+      integer(ik), allocatable       :: p_shellsz(:)  ! Shell size within each partition (so we assume that partitions are made
                                                       ! of equally-sized shells)
       integer(ik), allocatable       :: p_index(:)    ! Sequential number of each partition within it's partition-specific table
       !
       !  Position of the next point batch within the grid. We always return an entire shell
       !
-      integer(ik), public            :: next_part     ! Next partition to be processed; 1 to npartitions
+      integer(ik), public            :: next_part     ! Next partition to be processed; 1 to npartitions. NOTE: Set to public for use as atomic label,
+                                                      ! which only holds for when nrings = nouter = 0. In long term, should be GridPointsBatch output.
       integer(ik)                    :: next_shell    ! Next shell witin the partion; 1 to p_shells(next_part)
       !$ integer(OMP_LOCK_KIND)      :: update_lock   ! Lock must be acquired before modifying nexr_part, next_shell
       !
@@ -121,7 +122,7 @@
                               ring,ring_rc,ring_rn,ring_nrad,ring_nphi, &
                               outer,outer_rc,outer_rout,outer_nrad,outer_nang)
       type(mol_grid), intent(out)       :: grid        ! Grid to initialize
-      integer(ik), intent(in)           :: nrad        ! Basic number of radial points; actual number of points 
+      integer(ik), intent(in)           :: nrad        ! Basic number of radial points; actual number of points
                                                        ! may depend on this value and atom types
       integer(ik), intent(in)           :: nang        ! Number of angular points; can be 110, 302, or 770,
                                                        ! giving the corresponding Lebedev's grid
@@ -211,8 +212,8 @@
         grid%rings(1)%rn   = ring_rn / grid%rings(1)%rr
         grid%rings(1)%nphi =  ring_nphi
         grid%rings(1)%nrad =  ring_nrad
-        ! write (out,"('Added ring at rc = ',3f14.7)") grid%rings(1)%rc 
-        ! write (out,"('          Normal = ',3f14.7)") grid%rings(1)%rn 
+        ! write (out,"('Added ring at rc = ',3f14.7)") grid%rings(1)%rc
+        ! write (out,"('          Normal = ',3f14.7)") grid%rings(1)%rn
         ! write (out,"('          Radius = ', f14.7)") grid%rings(1)%rr
       end if
       !
@@ -325,7 +326,7 @@
     end subroutine GridInitialize
     !
     subroutine GridDestroy(grid)
-      type(mol_grid), intent(inout) :: grid 
+      type(mol_grid), intent(inout) :: grid
       !
       integer(ik) :: iord
       !
@@ -354,9 +355,9 @@
       !
       integer(ik) :: ipart, ishell ! Local copies of next_part and next_shell; needed to avoid holding
                                    ! a lock for too long.
-      integer(ik) :: iatom        
+      integer(ik) :: iatom
       integer(ik) :: shellsz       ! Size of the points batch
-      integer(ik) :: alloc       
+      integer(ik) :: alloc
       !
       call TimerStart('MolGrid PointsBatch')
       batch_case: select case (action)
@@ -469,7 +470,7 @@
       w_rad = w_rad * r_mid * 2._rk / (1-rad)**2
       rad   = r_mid * (1+rad)/(1-rad)
       !
-      !  Scale weight by the spherical volume element, since our angular grid 
+      !  Scale weight by the spherical volume element, since our angular grid
       !  is normalized to unity
       !
       w_rad = w_rad * 4._rk * pi * rad**2
@@ -607,8 +608,8 @@
       !
       !  Step one: fill grid positions and unscaled weights.
       !
-      integer(ik)       :: nrad          ! Number of radial points 
-      integer(ik)       :: nang          ! Number of angular points 
+      integer(ik)       :: nrad          ! Number of radial points
+      integer(ik)       :: nang          ! Number of angular points
       integer(ik)       :: iang
       real(rk)          :: rc(3)         ! Center of the sphere
       real(rk)          :: rad           ! Radius of the current sphere
@@ -635,7 +636,7 @@
       w_rad = w_rad * r_mid * 2._rk / (1-rad)**2
       rad   = r_mid * (1+rad)/(1-rad)
       !
-      !  Scale weight by the spherical volume element, since our angular grid 
+      !  Scale weight by the spherical volume element, since our angular grid
       !  is normalized to unity
       !
       w_rad = w_rad * 4._rk * pi * rad**2
@@ -712,7 +713,7 @@
       real(rk)    :: nuij     ! "Adjusted" cell boundary
       real(rk)    :: aij      ! Adjustment parameter
       real(rk)    :: chi      ! Ratio of atom sizes
-      real(rk)    :: uij      ! 
+      real(rk)    :: uij      !
       real(rk)    :: sf
       !
       iatom = grid%p_index(ipart)
@@ -745,7 +746,7 @@
     end function raw_weight
     !
     function distance_point_to_partition(grid,ipart,xyz) result(ri)
-      type(mol_grid), intent(in) :: grid 
+      type(mol_grid), intent(in) :: grid
       integer(ik), intent(in)    :: ipart
       real(rk), intent(in)       :: xyz(:)  ! Point for which we need the distance
       real(rk)                   :: ri
@@ -756,7 +757,7 @@
       select case (grid%p_type(ipart))
         case default
           stop 'molecular_grid%distance_point_to_partition - unknown partion type'
-        case ('Atom')  
+        case ('Atom')
           ri = sqrt(sum( (xyz-grid%atoms(iatom)%xyz)**2 ))
         case ('Ring')
           ri = pt_ring(xyz,grid%rings(iatom))
@@ -766,7 +767,7 @@
     end function distance_point_to_partition
     !
     function distance_partition_to_partition(grid,ipart,jpart,xyz) result(rij)
-      type(mol_grid), intent(in) :: grid 
+      type(mol_grid), intent(in) :: grid
       integer(ik), intent(in)    :: ipart  ! Partitions we need the distance between
       integer(ik), intent(in)    :: jpart
       real(rk), intent(in)       :: xyz(:) ! Point we are looking at; it may affect the partition-partition distance
@@ -779,7 +780,7 @@
       select case (trim(grid%p_type(ipart))//' '//trim(grid%p_type(jpart)))
         case default
           stop 'molecular_grid%distance_partition_to_partition - unknown partion type combination'
-        case ('Atom Atom')  
+        case ('Atom Atom')
           rij = sqrt(sum( (grid%atoms(jatom)%xyz-grid%atoms(iatom)%xyz)**2 ))
         case ('Atom Ring')
           rij = sphere_ring(xyz,grid%rings(jatom),grid%atoms(iatom)%xyz)
@@ -829,7 +830,7 @@
         !
         if (.not.get_rim_direction(sph_xyz)) then
           !
-          !  Sphere centre is on-axis as well; choose direction towards smallest 
+          !  Sphere centre is on-axis as well; choose direction towards smallest
           !  component of ring%rn
           !
           tmp_xyz = 0
@@ -842,7 +843,7 @@
       !
       ri  = sqrt(sum((sph_xyz-rim)**2))
       !
-      contains 
+      contains
       function get_rim_direction(pt_xyz) result(happy)
         real(rk), intent(in) :: pt_xyz(:) ! Point which defines the required rim direction
         real(rk)             :: r12(3)    ! Vector from the centre of the ring to the point

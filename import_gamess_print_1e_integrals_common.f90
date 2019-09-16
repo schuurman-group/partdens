@@ -39,15 +39,15 @@
       usegfmt = any(abs(v)>=1e5) .or. all(abs(v)<=1e-3)
       print_pages: do ic_p1=1,r%nbasis,cpp
         ic_pn = min(r%nbasis,ic_p1+cpp-1)
-        write (out,"(t17,10(1x,i12))") (ic,               ic=ic_p1,ic_pn)
-        if (head=='BOTH') write (out,"(t23,10(1x,a12))") (r%bas_labels(ic), ic=ic_p1,ic_pn)
+        write (out,"(t19,10(1x,i12))") (ic,               ic=ic_p1,ic_pn)
+        if (head=='BOTH') write (out,"(t25,10(a13))") (r%bas_labels(ic), ic=ic_p1,ic_pn)
         print_rows: do ir=1,l%nbasis
           lab = ' '
           if (head/='NONE') lab = l%bas_labels(ir)
           if (usegfmt) then
-            write (out,"(1x,i5,1x,a11,1x,10(1x,g12.5))") ir, lab, v(ir,ic_p1:ic_pn)
+            write (out,"(1x,i5,1x,a13,1x,10(1x,g12.5))") ir, lab, v(ir,ic_p1:ic_pn)
           else
-            write (out,"(1x,i5,1x,a11,1x,10(1x,f12.5))") ir, lab, v(ir,ic_p1:ic_pn)
+            write (out,"(1x,i5,1x,a13,1x,10(1x,f12.5))") ir, lab, v(ir,ic_p1:ic_pn)
           endif
         end do print_rows
         write (out,"()")

@@ -8,7 +8,7 @@
 !     real(ark), intent(in)   :: r_l(:)              ! Centre of the left b.f.
 !     real(ark), intent(in)   :: z_l                 ! Orbital exponent of the left b.f.
 !     real(ark), intent(in)   :: r_r(:)              ! ditto, for the right b.f.
-!     real(ark), intent(in)   :: z_r                 ! 
+!     real(ark), intent(in)   :: z_r                 !
 !     !
       real(kind(z_l)) :: zeta, p(3), s
       integer(ik)     :: m_l, m_r, idl, idr

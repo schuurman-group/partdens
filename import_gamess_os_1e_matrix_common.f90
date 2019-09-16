@@ -16,7 +16,7 @@
       !  Iterate over all shell blocks. Since l and r are not necessarily the same,
       !  matrix elements do not have to be symmetric, and we have to process all
       !  shell blocks explicitly.
-      ! 
+      !
       p1_r = 1
       r_atom_loop: do at_r=1,r%natoms
         r_shell_loop: do sh_r=1,r%atoms(at_r)%nshell

@@ -26,7 +26,7 @@
       real(kind(v)), allocatable  :: vb_r(:,:,:,:,:) ! Buffer for recursion
       real(kind(v))               :: wgt
       real(kind(v))               :: zet(4)          ! Primitive exponents
-      real(kind(v))               :: w_cut           ! Absolute cutoff 
+      real(kind(v))               :: w_cut           ! Absolute cutoff
       logical                     :: zero_primitives ! True if all primitive integrals are negligible
       real(kind(v))               :: ang_c_kind(lbound(ang_c,dim=1):ubound(ang_c,dim=1))
       !

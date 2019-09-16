@@ -82,12 +82,12 @@
         !
         !  The next two interactions - 'A/(R**2+A**2)' and 'R/(R**2+A**2)' are
         !  needed to calculate Coulomb potential at a complex position. I can't
-        !  find an analytical expression for these kernels, so the code gets a 
+        !  find an analytical expression for these kernels, so the code gets a
         !  little more complicated, and relies on expansion of the 1/(R**2+A**2)
         !  term in Gaussians. Using the 200-term expansion in os_integral_operators,
         !  A values between 0.01 and 100 Bohr, rho values between 0.001 and 100,
         !  and T values from 10^(-3) to 120 yield errors (the smallest of the absolute
-        !  and relative error) of better than 1e-7. This is not great, but OK for 
+        !  and relative error) of better than 1e-7. This is not great, but OK for
         !  our intended use.
         !
         case ('A/(R**2+A**2)')

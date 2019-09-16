@@ -6,7 +6,7 @@
 !     real(ark), intent(in)    :: r_l(:)             ! Centre of the left b.f.
 !     real(ark), intent(in)    :: z_l                ! Orbital exponent of the left b.f.
 !     real(ark), intent(in)    :: r_r(:)             ! ditto, for the right b.f.
-!     real(ark), intent(in)    :: z_r                ! 
+!     real(ark), intent(in)    :: z_r                !
       !
       real(kind(z_l)) :: zeta, xi, p(3), s00, s
       integer(ik)     :: m_l, m_r, ic, id1, id2, id3
@@ -33,7 +33,7 @@
         end do find_right
       end do right_bootstrap
       !
-      !  Now the general case: always recurse on the left. This is the 
+      !  Now the general case: always recurse on the left. This is the
       !                        full eq. A7 of Obara-Saika
       !
       right_loop: do m_r=0,p2_r

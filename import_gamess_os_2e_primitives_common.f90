@@ -20,7 +20,7 @@
       real(kind(vb)) :: gf_tmp
       !
       ! There is a lot of overlap between formulae below and os_common_primitives()
-      ! 
+      !
       zeta = zet(1) + zet(2)                                        ! Ahlrichs eq. 3
       eta  = zet(3) + zet(4)                                        ! ... ditto
       rho  = zeta * eta / (zeta + eta)                              ! ... ditto
@@ -79,7 +79,7 @@
         call get_parent(i,ic,id1)
         il = sum(ang_nxyz(i,:))
         boot_i_order: do m=0,nrec-il
-            s = (p(ic)-xyz(ic,1)) * vb(id1,0,0,0,m) 
+            s = (p(ic)-xyz(ic,1)) * vb(id1,0,0,0,m)
             s = s - (rho/zeta) * (p(ic)-q(ic)) * vb(id1,0,0,0,m+1)
             id2 = drop_xyz(id1,ic)
             if (id2>=0) then

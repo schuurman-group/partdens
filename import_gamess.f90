@@ -1,7 +1,7 @@
 !
 !  Import simple GAMESS checkpoint files.
 !
-!  Restrictions: 
+!  Restrictions:
 !    Only C1 symmetry (no symmetry) is allowed.
 !    Basis sets must be in-line.
 !    Only simple, single-SCF files are supported.
@@ -14,7 +14,7 @@
 !
 !  Added Feb 2010 (Michael Spanner): Support for loading natural orbital occupation numbers
 !                                    and rdm_sv values from the GAMESS checkpoint files.
-!  Added March 2010 (Michael Spanner): Support for rotating the gamess data relative to multigrid 
+!  Added March 2010 (Michael Spanner): Support for rotating the gamess data relative to multigrid
 !
 !  Added Aug 2011 (SP): Support for 3-centre 1e integral evaluation. The 3-centre integrals
 !                       implementation is essentiall Obara-Saika, with the extensions to
@@ -44,8 +44,8 @@
 !
 !  Apr 23, 2014 (SP): Added support for (most) integrals in quadruple precision.
 !
-!  In order to remain compatible with historical usage in multigrid, we 
-!  maintain a default structure context; all calls which do not specify 
+!  In order to remain compatible with historical usage in multigrid, we
+!  maintain a default structure context; all calls which do not specify
 !  (one of the) context(s) default to that one.
 !
   module import_gamess
@@ -75,7 +75,7 @@
     !
     !  Conditional compilation is needed for the interfaces:
     !  the _quad versions differ only in their argument kinds; if we
-    !  compile with real and quad kinds being the same, the interface 
+    !  compile with real and quad kinds being the same, the interface
     !  part will fail!
     !
     interface gamess_print_1e_integrals
@@ -193,7 +193,7 @@
                      target, optional :: structure   ! Context to use
       logical, intent(in), optional   :: true_charge ! Report true nuclear charge, including the ECP charge
       !
-      type(gam_structure), pointer :: gam          
+      type(gam_structure), pointer :: gam
       integer(ik)                  :: na
       logical                      :: add_ecp
       !
@@ -274,7 +274,7 @@
       gam%nbatches = 0
     end subroutine gamess_destroy
     !
-    !  Load structure file and evaluate the MOs. This subroutine is a little 
+    !  Load structure file and evaluate the MOs. This subroutine is a little
     !  complicated, since it can perform three separate functions:
     !
     !  1. Parse GAMESS checkpoint file, and remember the result. In this case,
@@ -305,7 +305,7 @@
                                              :: structure      ! Context to use
       real(rk), intent(in), optional        :: rot(:,:)       ! Rotation matrix to apply to the structure. It is
                                                                ! perfectly OK to use different rotation matrix
-                                                               ! in different calls using the same context. 
+                                                               ! in different calls using the same context.
                                                                ! If the rotation matrix is not given for a call where
                                                                ! file= is specified, it will be reset to unit matrix.
                                                                ! If the rotation matrix is not given for a pure-evaluation
@@ -391,7 +391,7 @@
       !
       if (evaluate_mos .and. .not.load_mos) then
         if (.not.allocated(gam%atoms) .or. .not.allocated(gam%vectors)) then
-          write (out,"('import_gamess%gamess_load_orbitals: basis set and/or orbitals are not present')") 
+          write (out,"('import_gamess%gamess_load_orbitals: basis set and/or orbitals are not present')")
           stop 'import_gamess%gamess_load_orbitals: basis set and/or orbitals are not present'
         end if
       end if
@@ -446,7 +446,7 @@
         call TimerStop('GAMESS import - orbitals')
       end if ! evaluate_mos
       !
-      !  Special logic for the legacy semantics - MO matrix may be quite large, 
+      !  Special logic for the legacy semantics - MO matrix may be quite large,
       !  and it won't be needed after this point.
       !
       if (load_mos .and. evaluate_mos) then
@@ -560,8 +560,8 @@
                                           :: structure   ! Context to use
       real(rk), intent(in), optional     :: rot(:,:)    ! Rotation matrix to apply to the structure. It is
                                                          ! perfectly OK to use different rotation matrix
-                                                         ! in different calls using the same context. 
-                                                         ! If the rotation matrix is not given, rotation matrix 
+                                                         ! in different calls using the same context.
+                                                         ! If the rotation matrix is not given, rotation matrix
                                                          ! from the previous call will be used.
       !
       type(gam_structure), pointer :: gam
@@ -592,7 +592,7 @@
       end if
       !
       if (.not.allocated(gam%atoms)) then
-        write (out,"('import_gamess%gamess_evaluate_functions: basis set is not present')") 
+        write (out,"('import_gamess%gamess_evaluate_functions: basis set is not present')")
         stop 'import_gamess%gamess_evaluate_functions: basis set is not present'
       end if
       !
@@ -627,7 +627,7 @@
       end if
       have_natocc = .false.
       scan_lines: do while (.not.have_natocc)
-        call gam_readline 
+        call gam_readline
         if (gam_line_buf==' $OCCNO ') then
           call parse_natocc_data(natural_occ,natural_count)
           have_natocc = .true.
@@ -637,7 +637,7 @@
       call TimerStop('GAMESS import natocc')
     end subroutine gamess_load_natocc
     !
-    !  Load the transition density decomposition singular values 
+    !  Load the transition density decomposition singular values
     !
     subroutine gamess_load_rdmsv(file,rdm_sv,rdm_count)
       character(len=*), intent(in) :: file            ! Name of the GAMESS checkpoint file
@@ -657,7 +657,7 @@
       end if
       have_rdm = .false.
       scan_lines: do while (.not.have_rdm)
-        call gam_readline 
+        call gam_readline
         if (gam_line_buf==' $RDMPCE') then
           call parse_rdmsv_data(rdm_sv,rdm_count)
           have_rdm = .true.
@@ -754,7 +754,9 @@
         !
         !  First the integrals where no additional parmaters are needed:
         !
-        !  'AO PLANEWAVE'  - Complex planewave operator [Exp(I K R)]; needs K vector
+        !  'AO PLANEWAVE'   - Complex planewave operator [Exp(I K R)]; needs K vector
+        !  'AO R PLANEWAVE' - Component of R (X, Y, or Z), times the planewave.
+        !                     Neeeds K vector and the X/Y/Z index.
         !
         case ('AO PLANEWAVE')
           if (.not.present(op_param)) then
@@ -766,6 +768,26 @@
             stop 'import_gamess%gamess_1e_integrals_complex: Wrong parameter count'
           end if
           op_data%kvec = real(op_param(1:3),kind=kind(op_data%kvec))
+          call os_1e_matrix(op_data,l,r,v)
+        case ('AO R PLANEWAVE')
+          if (.not.present(op_param)) then
+            write (out,"('import_gamess%gamess_1e_integrals_complex: exponent missing for ',a)") trim(lwhat)
+            stop 'import_gamess%gamess_1e_integrals_complex: Missing operator parameter'
+          end if
+          if (size(op_param)/=3) then
+            write (out,"('import_gamess%gamess_1e_integrals_complex: wrong number of parameters for ',a)") trim(lwhat)
+            stop 'import_gamess%gamess_1e_integrals_complex: Wrong parameter count'
+          end if
+          op_data%kvec = real(op_param(1:3),kind=kind(op_data%kvec))
+          if (.not.present(op_index)) then
+            write (out,"('import_gamess%gamess_1e_integrals_complex: index missing for ',a)") trim(lwhat)
+            stop 'import_gamess%gamess_1e_integrals_complex: Missing operator parameter'
+          end if
+          if (size(op_index)/=1) then
+            write (out,"('import_gamess%gamess_1e_integrals_complex: wrong number of parameters for ',a)") trim(lwhat)
+            stop 'import_gamess%gamess_1e_integrals_complex: Wrong parameter count'
+          end if
+          op_data%op_i = op_index(1)
           call os_1e_matrix(op_data,l,r,v)
       end select
       call TimerStop('GAMESS '//trim(what))
@@ -850,15 +872,15 @@
       usegfmt = any(abs(v)>=1e5) .or. all(abs(v)<=1e-3)
       print_pages: do ic_p1=1,r%nbasis,cpp
         ic_pn = min(r%nbasis,ic_p1+cpp-1)
-        write (out,"(t17,5(2x,i12,1x,12x))") (ic,               ic=ic_p1,ic_pn)
-        if (head=='BOTH') write (out,"(t23,5(2x,a12,1x,12x))") (r%bas_labels(ic), ic=ic_p1,ic_pn)
+        write (out,"(t19,5(2x,i12,1x,12x))") (ic,               ic=ic_p1,ic_pn)
+        if (head=='BOTH') write (out,"(t25,5(2x,a13,1x,11x))") (r%bas_labels(ic), ic=ic_p1,ic_pn)
         print_rows: do ir=1,l%nbasis
           lab = ' '
           if (head/='NONE') lab = l%bas_labels(ir)
           if (usegfmt) then
-            write (out,"(1x,i5,1x,a11,1x,5(2x,g12.5,1x,g12.5))") ir, lab, v(ir,ic_p1:ic_pn)
+            write (out,"(1x,i5,1x,a13,1x,5(2x,g12.5,1x,g12.5))") ir, lab, v(ir,ic_p1:ic_pn)
           else
-            write (out,"(1x,i5,1x,a11,1x,5(2x,f12.5,1x,g12.5))") ir, lab, v(ir,ic_p1:ic_pn)
+            write (out,"(1x,i5,1x,a13,1x,5(2x,f12.5,1x,g12.5))") ir, lab, v(ir,ic_p1:ic_pn)
           endif
         end do print_rows
         write (out,"()")
@@ -930,7 +952,7 @@
                                                                        ! molecule - not that this is hard for an AO integral
       real(rk), intent(in), optional                    :: op_param(:) ! Additional parameters for the operator
       real(rk), intent(in), optional                    :: accuracy    ! Desired accuracy of the integrals; contributions
-                                                                       ! smaller than this can be neglected. 
+                                                                       ! smaller than this can be neglected.
                                                                        ! The default is to be as accurate as possible.
                                                                        ! Negative accuracy will restore the default behaviour
       !
@@ -949,7 +971,7 @@
                                                                        ! molecule - not that this is hard for an AO integral
       real(xrk), intent(in), optional                   :: op_param(:) ! Additional parameters for the operator
       real(xrk), intent(in), optional                   :: accuracy    ! Desired accuracy of the integrals; contributions
-                                                                       ! smaller than this can be neglected. 
+                                                                       ! smaller than this can be neglected.
                                                                        ! The default is to be as accurate as possible.
                                                                        ! Negative accuracy will restore the default behaviour
       !
@@ -963,9 +985,9 @@
       integer(ik)                        :: iat, ish
       !
       allocate (gam%atoms(gam_max_atoms))
-      ! 
+      !
       !  Comment line - ignore
-      !  
+      !
       call gam_readline ; call echo(1_ik)
       !
       !  Symmetry line. We'll only accept C1.
@@ -980,7 +1002,7 @@
       !  Begin loading geometry, COORD=UNIQUE format
       !
       gam%natoms = 0
-      load_atoms: do 
+      load_atoms: do
         call gam_readline ; call echo(1_ik)
         if (gam_line_buf==' $END') exit load_atoms
         gam%natoms = gam%natoms + 1
@@ -996,9 +1018,9 @@
       if (gam%natoms==0) then
         stop 'import_gamess%parse_geometry_data - Found no atoms!'
       end if
-      ! 
+      !
       !  Count basis functions and contractions
-      !  
+      !
       gam%nbasis = 0
       gam%max_contractions = 0
       count_basis: do iat=1,gam%natoms
@@ -1036,14 +1058,14 @@
       integer(ik)  :: shell_size         ! Number of orbitals in the current shell
       integer(ik)  :: sh_l               ! Angular momentum of the current shell
       !
-      !  Count batches 
+      !  Count batches
       !
       gam%nbatches   = 0
       gam%max_shells = 0
       !
       count_2e_batches_atoms: do iat=1,gam%natoms
         if (gam%atoms(iat)%nshell<=0) cycle count_2e_batches_atoms
-        gam%nbatches   = gam%nbatches + 1 
+        gam%nbatches   = gam%nbatches + 1
         batch_shells   = 1
         gam%max_shells = max(gam%max_shells,batch_shells)
         sh_l           = gam%atoms(iat)%sh_l(1)
@@ -1169,7 +1191,7 @@
       !
       atom%nshell  = 0 ;
       atom%sh_p(1) = 1 ;
-      read_shells: do 
+      read_shells: do
         call gam_readline ; call echo(1_ik)
         if (gam_line_buf==' ') exit read_shells ! End of atom data
         read (gam_line_buf,*,iostat=ios) lcode, nprim
@@ -1199,6 +1221,8 @@
           case ('D') ; atom%sh_l(atom%nshell) = 2
           case ('F') ; atom%sh_l(atom%nshell) = 3
           case ('G') ; atom%sh_l(atom%nshell) = 4
+          case ('H') ; atom%sh_l(atom%nshell) = 5
+          case ('I') ; atom%sh_l(atom%nshell) = 6
         end select
         !
         pprim = atom%sh_p(atom%nshell)
@@ -1271,13 +1295,13 @@
       !  for the detailed description of what we are missing here
       !
       iat = 0
-      load_atoms: do 
+      load_atoms: do
         call gam_readline ; call echo(1_ik)
         if (gam_line_buf==' $END') exit load_atoms
         !
         iat = iat + 1
         if (iat>gam%natoms) then
-          write (out,"('import_gamess%parse_ecp_data: More ECPs than there are atoms.')") 
+          write (out,"('import_gamess%parse_ecp_data: More ECPs than there are atoms.')")
           write (out,"('Last processed line: ',a)") trim(gam_line_buf)
           stop 'import_gamess%parse_ecp_data - too many ECPs'
         end if
@@ -1443,6 +1467,8 @@
           case ('D') ; atom%sh_l(atom%nshell) = 2
           case ('F') ; atom%sh_l(atom%nshell) = 3
           case ('G') ; atom%sh_l(atom%nshell) = 4
+          case ('H') ; atom%sh_l(atom%nshell) = 5
+          case ('I') ; atom%sh_l(atom%nshell) = 6
         end select
         !
         pprim = atom%sh_p(atom%nshell)
@@ -1531,7 +1557,7 @@
                  ios, trim(gam_line_buf)
           stop 'import_gamess%parse_orbital_data - format error'
         end if
-        ! 
+        !
         !  Line parsed, check it for validity
         !
         wrap_mo = gam%nvectors+1
@@ -1589,7 +1615,7 @@
                  ios, trim(gam_line_buf)
           stop 'import_gamess%parse_natocc_data - format error (1)'
         end if
-        ! 
+        !
         line_numocc = len_trim(gam_line_buf)/16
         !
         if (line_numocc>5) then
@@ -1599,13 +1625,13 @@
         end if
         !
         if ( (natural_count+line_numocc)>max_numocc) then
-          write (out,"('import_gamess%parse_natocc_data: too many natural orbitals in file. Increase max_naturals and recompile.')") 
+          write (out,"('import_gamess%parse_natocc_data: too many natural orbitals in file. Increase max_naturals and recompile.')")
           stop 'import_gamess%parse_natocc_data - too many natural orbitals - increase max_naturals and recompile.'
         end if
         !
         natural_occ(natural_count+1:natural_count+line_numocc) = loc_val(1:line_numocc)
         natural_count = natural_count + line_numocc
-        ! 
+        !
       end do read_natocc
       !
       if (verbose>=0) then
@@ -1636,7 +1662,7 @@
                  ios, trim(gam_line_buf)
           stop 'import_gamess%parse_rdmsv_data - format error (1)'
         end if
-        ! 
+        !
         line_numsv = len_trim(gam_line_buf)/15
         !
         if (line_numsv>5) then
@@ -1646,13 +1672,13 @@
         end if
         !
         if ( (rdm_count+line_numsv)>max_numsv) then
-          write (out,"('import_gamess%parse_rdmsv_data: too many rdm orbitals in file. Increase max_rdm and recompile.')") 
+          write (out,"('import_gamess%parse_rdmsv_data: too many rdm orbitals in file. Increase max_rdm and recompile.')")
           stop 'import_gamess%parse_rdmsv_data - too many rdm orbitals - increase max_rdm and recompile.'
         end if
         !
         rdm_sv(rdm_count+1:rdm_count+line_numsv) = loc_val(1:line_numsv)
         rdm_count = rdm_count + line_numsv
-        ! 
+        !
       end do read_rdmsv
       !
       if (verbose>=0) then
@@ -1686,9 +1712,9 @@
                                                          ! The last index is for the MOs.
       !
       integer(ik), allocatable  :: special_pt(:,:)    ! Grid points, where oversampling is deemed
-                                                      ! necessary. The final 3 entries are the expected 
+                                                      ! necessary. The final 3 entries are the expected
                                                       ! number or samples per point.
-      real(rk)                  :: r_cut              ! Max distance from the nearest nucleus to 
+      real(rk)                  :: r_cut              ! Max distance from the nearest nucleus to
                                                       ! trigger oversampling
       integer(ik)               :: num_special        ! Number of grid points requiring special treatment
       integer(ik)               :: num_special_max    ! (Estimate of the maximum possible # of the special points
@@ -1696,7 +1722,7 @@
       integer(ik)               :: isp                ! Special-point index
 !
 !    For some reason, GNU Fortran has trouble with private automatic arrays - they seem to
-!    cause segmentation faults in parallel runs. We'll simply have to allicate basval 
+!    cause segmentation faults in parallel runs. We'll simply have to allicate basval
 !    inside the parallel section ....
 !
 !     real(rk)                 :: basval(gam%nbasis) ! local buffer for basis function values
@@ -1730,7 +1756,7 @@
               call evaluate_basis_functions(gam,coord(1:3,ipx,ipy,ipz),basval)
               !
               !  Loop over MOs
-              ! 
+              !
               grid(ipx,ipy,ipz,dst) = matmul(basval,gam%vectors(:,mos))
             end do grid_x1
           end do grid_y1
@@ -1744,7 +1770,7 @@
             call evaluate_basis_functions(gam,coord(1:3,ipx,ipy,1),basval)
             !
             !  Loop over MOs
-            ! 
+            !
             grid(ipx,ipy,1,dst) = matmul(basval,gam%vectors(:,mos))
           end do grid_x2
         end do grid_y2
@@ -1756,7 +1782,7 @@
           call evaluate_basis_functions(gam,coord(1:3,ipx,1,1),basval)
           !
           !  Loop over MOs
-          ! 
+          !
           grid(ipx,1,1,dst) = matmul(basval,gam%vectors(:,mos))
         end do grid_x3
         !$omp end do
@@ -1764,7 +1790,7 @@
       if (verbose>=0 .and. num_special>0) then
         !$omp single
         write (out,"(/'Number of grid points requiring oversampling: ',i8/)") num_special
-        if (num_special>0 .and. verbose>3) then 
+        if (num_special>0 .and. verbose>3) then
           report_special: do isp=1,num_special
             ipx = special_pt(1,isp)
             ipy = special_pt(2,isp)
@@ -1777,7 +1803,7 @@
       end if
       !
       !  The required degree of oversampling is likely to be (very) different for each volume
-      !  element. In this situation, the only reasonable schedule is "dynamic". An alternative 
+      !  element. In this situation, the only reasonable schedule is "dynamic". An alternative
       !  would be to parallelize individual volume elements; if load balancing becomes an issue,
       !  that's the natural thing to try.
       !
@@ -1840,9 +1866,9 @@
         !
         call get_oversampling_order(ord,gam,abs_xyz)
         !
-        !  This volume element needs to be sub-sampled - Update the hit list. 
-        !  Since this routine is executing concurrently, we have to excercise 
-        !  a bit of care! 
+        !  This volume element needs to be sub-sampled - Update the hit list.
+        !  Since this routine is executing concurrently, we have to excercise
+        !  a bit of care!
         !
         if (product(ord)>1) then
         !$omp critical
@@ -1952,7 +1978,7 @@
           !
           if (verbose>=2 .or. warn_symmetry) then
             !$omp critical
-          
+
             if (verbose>=2 .or. warn_symmetry) then
               write (out,"(/'Unable to consistently oversample orbital at grid point ',3(1x,f14.7))") coord
               write (out,"('Central value: ',g14.7,' average: ',g14.7,' root of average square: ',g14.7/)") &
@@ -2041,7 +2067,7 @@
         end do scan_shells
       end do scan_atoms
       !
-      !  Now scale the number of primitives across the diagonal according to the 
+      !  Now scale the number of primitives across the diagonal according to the
       !  linear extent of each dimension
       !
       ord = ceiling( (gam%dx * npts) / diag)
@@ -2062,8 +2088,8 @@
       integer(ik)             :: p_bas
       type(gam_atom), pointer :: at
       real(rk)                :: rot_xyz(3)
-      real(rk)                :: xyz(3,0:5), r2
-      real(rk)                :: ang(0:34)
+      real(rk)                :: xyz(3,0:7), r2
+      real(rk)                :: ang(0:gam_nxyz-1)
       real(rk)                :: radial, exparg
 !     real(rk)                :: ang_c_kind(lbound(ang_c,dim=1):ubound(ang_c,dim=1))
 !     !
@@ -2076,7 +2102,7 @@
       rot_xyz = matmul(transpose(gam%rotmat_rk),abs_xyz)
       !
       !  Process all centres containing basis functions
-      ! 
+      !
       p_bas = 1
       atom_loop: do iat=1,gam%natoms
         at => gam%atoms(iat)
@@ -2094,6 +2120,8 @@
         xyz(:,3) = xyz(:,1)*xyz(:,2)
         xyz(:,4) = xyz(:,2)**2
         xyz(:,5) = xyz(:,2)*xyz(:,3)
+        xyz(:,6) = xyz(:,3)**2
+        xyz(:,7) = xyz(:,4)*xyz(:,3)
         !
         !  Calculate square distance
         !
@@ -2141,10 +2169,10 @@
     subroutine evaluate_basis_functions_and_gradients(gam,abs_xyz,basval)
       type(gam_structure), target, intent(in) :: gam          ! Context to use
       real(rk), intent(in)                    :: abs_xyz(:)   ! Coordinates of the point
-      real(rk), intent(out)                  :: basval(:,:)  ! First index:
+      real(rk), intent(out)                   :: basval(:,:)  ! First index:
                                                               ! 1 = Values of the basis functions
                                                               ! 2 = X gradient of the basis function, etc
-                                                               
+
       !
       integer(ik)             :: iat, ish
       integer(ik)             :: ip1, ip2, ip
@@ -2152,8 +2180,8 @@
       integer(ik)             :: p_bas
       type(gam_atom), pointer :: at
       real(rk)                :: rot_xyz(3)
-      real(rk)                :: xyz(3,-1:6), r2
-      real(rk)                :: ang(0:34), angd(3,0:34), angu(3,0:34)
+      real(rk)                :: xyz(3,-1:8), r2
+      real(rk)                :: ang(0:gam_nxyz-1), angd(3,0:gam_nxyz-1), angu(3,0:gam_nxyz-1)
       real(rk)                :: radial, radial2, exparg
 !     real(rk)                :: ang_c_kind(lbound(ang_c,dim=1):ubound(ang_c,dim=1))
 !     !
@@ -2166,7 +2194,7 @@
       rot_xyz = matmul(transpose(gam%rotmat_rk),abs_xyz)
       !
       !  Process all centres containing basis functions
-      ! 
+      !
       p_bas = 1
       atom_loop: do iat=1,gam%natoms
         at => gam%atoms(iat)
@@ -2185,7 +2213,9 @@
         xyz(:, 3) = xyz(:,1)*xyz(:,2)
         xyz(:, 4) = xyz(:,2)**2
         xyz(:, 5) = xyz(:,2)*xyz(:,3)
-        xyz(:, 6) = xyz(:,3)*xyz(:,3)
+        xyz(:, 6) = xyz(:,3)**2
+        xyz(:, 7) = xyz(:,4)*xyz(:,3)
+        xyz(:, 8) = xyz(:,4)**2
         !
         !  Calculate square distance
         !
@@ -2251,7 +2281,7 @@
       include 'import_gamess_os_1e_matrix_common.f90'
     end subroutine os_1e_matrix_real
     !
-    !  Real operators, quad accuracy. 
+    !  Real operators, quad accuracy.
     !
     subroutine os_1e_matrix_quad(what,l,r,v)
       type (gam_operator_data), intent(in) :: what   ! Operator to evaluate
@@ -2283,9 +2313,9 @@
       real(rk), intent(in)                :: z_l(:)  ! Primitive exponents on the left
       real(rk), intent(in)                :: c_l(:)  ! Contractions on the left
       real(rk), intent(in)                :: r_r(:)  ! Ditto on the right
-      integer(ik), intent(in)              :: l_r     ! 
-      real(rk), intent(in)                :: z_r(:)  ! 
-      real(rk), intent(in)                :: c_r(:)  ! 
+      integer(ik), intent(in)              :: l_r     !
+      real(rk), intent(in)                :: z_r(:)  !
+      real(rk), intent(in)                :: c_r(:)  !
       !
       include 'import_gamess_os_1e_contraction_common.f90'
     end subroutine os_1e_contraction_real
@@ -2300,9 +2330,9 @@
       real(xrk), intent(in)                :: z_l(:)  ! Primitive exponents on the left
       real(xrk), intent(in)                :: c_l(:)  ! Contractions on the left
       real(xrk), intent(in)                :: r_r(:)  ! Ditto on the right
-      integer(ik), intent(in)              :: l_r     ! 
-      real(xrk), intent(in)                :: z_r(:)  ! 
-      real(xrk), intent(in)                :: c_r(:)  ! 
+      integer(ik), intent(in)              :: l_r     !
+      real(xrk), intent(in)                :: z_r(:)  !
+      real(xrk), intent(in)                :: c_r(:)  !
       !
       include 'import_gamess_os_1e_contraction_common.f90'
     end subroutine os_1e_contraction_quad
@@ -2317,9 +2347,9 @@
       real(rk), intent(in)                :: z_l(:)  ! Primitive exponents on the left
       real(rk), intent(in)                :: c_l(:)  ! Contractions on the left
       real(rk), intent(in)                :: r_r(:)  ! Ditto on the right
-      integer(ik), intent(in)              :: l_r     ! 
-      real(rk), intent(in)                :: z_r(:)  ! 
-      real(rk), intent(in)                :: c_r(:)  ! 
+      integer(ik), intent(in)              :: l_r     !
+      real(rk), intent(in)                :: z_r(:)  !
+      real(rk), intent(in)                :: c_r(:)  !
       !
       integer(ik)              :: ic_l, p1_l, p2_l, p_l, int_l
       integer(ik)              :: ic_r, p1_r, p2_r, p_r, int_r
@@ -2347,6 +2377,8 @@
           n_rec = l_l + l_r
         case ('PLANEWAVE')
           n_rec = 0
+        case ('R PLANEWAVE')
+          n_rec = 1
       end select
       allocate (vb_r(0:p2_l,0:p2_r,0:n_rec),stat=alloc)
       if (alloc/=0) then
@@ -2368,6 +2400,15 @@
               stop 'import_gamess%os_1e_contraction_complex: Unimplemented property'
             case ('PLANEWAVE')
               call os_1e_planewave(p2_l,p2_r,vb_r(:,:,0),r_l,z_l(ic_l),r_r,z_r(ic_r),real(what%kvec,kind=kind(vb_r)))
+            case ('R PLANEWAVE')
+              if (what%op_i<1 .or. what%op_i>3) then
+                write (out,"('import_gamess%os_1e_contraction_complex: Dipole component ',i0,' is not between 1 and 3 in ',a)") &
+                       what%op_i, trim(what%op_name)
+                stop 'import_gamess%os_1e_contraction_complex: Bad dipole'
+              end if
+              call os_1e_planewave(p2_l,p2_r,vb_r(:,:,1),r_l,z_l(ic_l),r_r,z_r(ic_r),real(what%kvec,kind=kind(vb_r)))
+              call os_1e_pwdipole (what%op_i,vb_r(:,:,1), &
+                                   p2_l,p2_r,vb_r(:,:,0),r_l,z_l(ic_l),r_r,z_r(ic_r),real(what%kvec,kind=kind(vb_r)))
           end select
           !
           wgt = c_l(ic_l) * c_r(ic_r)
@@ -2396,7 +2437,7 @@
       real(rk), intent(in)    :: r_l(:)             ! Centre of the left b.f.
       real(rk), intent(in)    :: z_l                ! Orbital exponent of the left b.f.
       real(rk), intent(in)    :: r_r(:)             ! ditto, for the right b.f.
-      real(rk), intent(in)    :: z_r                ! 
+      real(rk), intent(in)    :: z_r                !
       !
       include 'import_gamess_os_1e_overlap_common.f90'
     end subroutine os_1e_overlap_real
@@ -2409,7 +2450,7 @@
       real(xrk), intent(in)   :: r_l(:)              ! Centre of the left b.f.
       real(xrk), intent(in)   :: z_l                 ! Orbital exponent of the left b.f.
       real(xrk), intent(in)   :: r_r(:)              ! ditto, for the right b.f.
-      real(xrk), intent(in)   :: z_r                 ! 
+      real(xrk), intent(in)   :: z_r                 !
       !
       include 'import_gamess_os_1e_overlap_common.f90'
     end subroutine os_1e_overlap_quad
@@ -2423,7 +2464,7 @@
       real(rk), intent(in)    :: r_l(:)              ! Centre of the left b.f.
       real(rk), intent(in)    :: z_l                 ! Orbital exponent of the left b.f.
       real(rk), intent(in)    :: r_r(:)              ! ditto, for the right b.f.
-      real(rk), intent(in)    :: z_r                 ! 
+      real(rk), intent(in)    :: z_r                 !
       real(rk), intent(in)    :: kvec(3)             ! Planewave momentum
       !
       real(rk)    :: zeta, xi, p(3), s00
@@ -2436,7 +2477,7 @@
       !
       vb_p(0,0) = s00 * exp(-sum(kvec**2)/(4*zeta)) * exp((0,1)*sum(kvec*p))
       !
-      !  Bootstrap: calculate all overlaps on the right, keeping left at zero. 
+      !  Bootstrap: calculate all overlaps on the right, keeping left at zero.
       !
       right_bootstrap: do m_r=1,p2_r
         find_right: do ic=1,3
@@ -2450,7 +2491,7 @@
         end do find_right
       end do right_bootstrap
       !
-      !  Now the general case: always recurse on the left. 
+      !  Now the general case: always recurse on the left.
       !
       right_loop: do m_r=0,p2_r
         left_recurrence: do m_l=1,p2_l
@@ -2479,7 +2520,7 @@
       real(rk), intent(in)    :: r_l(:)             ! Centre of the left b.f.
       real(rk), intent(in)    :: z_l                ! Orbital exponent of the left b.f.
       real(rk), intent(in)    :: r_r(:)             ! ditto, for the right b.f.
-      real(rk), intent(in)    :: z_r                ! 
+      real(rk), intent(in)    :: z_r                !
       !
       include 'import_gamess_os_1e_dipole_common.f90'
     end subroutine os_1e_dipole_real
@@ -2494,10 +2535,45 @@
       real(xrk), intent(in)   :: r_l(:)              ! Centre of the left b.f.
       real(xrk), intent(in)   :: z_l                 ! Orbital exponent of the left b.f.
       real(xrk), intent(in)   :: r_r(:)              ! ditto, for the right b.f.
-      real(xrk), intent(in)   :: z_r                 ! 
+      real(xrk), intent(in)   :: z_r                 !
       !
       include 'import_gamess_os_1e_dipole_common.f90'
     end subroutine os_1e_dipole_quad
+    !
+    !  Note that we are using a simpler, direct expression in terms of overlap integrals.
+    !  Effectively, we first recurse over the components of the moment operator, then
+    !  over the function. Our real dipole expressions are instead in terms of the much
+    !  more complex O&S recursion, which recurses over the function first.
+    !
+    subroutine os_1e_pwdipole(id,vb_s,p2_l,p2_r,vb_p,r_l,z_l,r_r,z_r,kvec)
+      integer(ik), intent(in)  :: id                  ! Dipole component to evaluate
+      integer(ik), intent(in)  :: p2_l, p2_r          ! Upper dimensions of the vb_p array
+      complex(rk), intent(in)  :: vb_s(0:p2_l,0:p2_r) ! Buffer containing primitive overlaps
+      complex(rk), intent(out) :: vb_p(0:p2_l,0:p2_r) ! Final result.
+      real(rk), intent(in)     :: r_l(:)              ! Centre of the left b.f.
+      real(rk), intent(in)     :: z_l                 ! Orbital exponent of the left b.f.
+      real(rk), intent(in)     :: r_r(:)              ! ditto, for the right b.f.
+      real(rk), intent(in)     :: z_r                 !
+      real(rk), intent(in)     :: kvec(3)             ! Planewave momentum
+      !
+      real(kind(z_l))    :: zeta, p(3)
+      complex(kind(z_l)) :: s, scl00
+      integer(ik)        :: m_l, m_r, id1, id2
+      !
+      call os_common_primitives(r_l,z_l,r_r,z_r,zeta=zeta,p=p)
+      scl00 = p(id) + (0,1)*kvec(id)/(2*zeta)
+      !
+      right_loop: do m_r=0,p2_r
+        left_loop: do m_l=0,p2_l
+          s   = scl00 * vb_s(m_l,m_r)
+          id1 = drop_xyz(m_l,id)
+          id2 = drop_xyz(m_r,id)
+          if (id1>=0) s = s + vb_s(id1,m_r) * ang_nxyz(m_l,id)/(2*zeta)
+          if (id2>=0) s = s + vb_s(m_l,id2) * ang_nxyz(m_r,id)/(2*zeta)
+          vb_p(m_l,m_r) = s
+        end do left_loop
+      end do right_loop
+    end subroutine os_1e_pwdipole
     !
     !  Calculate primitive matrix elements of (d/dx) operator.
     !  These reduce to linear combinations of overlap integrals, so it's extra easy.
@@ -2511,7 +2587,7 @@
       real(rk), intent(in)   :: r_l(:)              ! Centre of the left b.f.
       real(rk), intent(in)   :: z_l                 ! Orbital exponent of the left b.f.
       real(rk), intent(in)   :: r_r(:)              ! ditto, for the right b.f.
-      real(rk), intent(in)   :: z_r                 ! 
+      real(rk), intent(in)   :: z_r                 !
       !
       include 'import_gamess_os_1e_grad_common.f90'
     end subroutine os_1e_grad_real
@@ -2524,7 +2600,7 @@
       real(xrk), intent(in)   :: r_l(:)              ! Centre of the left b.f.
       real(xrk), intent(in)   :: z_l                 ! Orbital exponent of the left b.f.
       real(xrk), intent(in)   :: r_r(:)              ! ditto, for the right b.f.
-      real(xrk), intent(in)   :: z_r                 ! 
+      real(xrk), intent(in)   :: z_r                 !
       !
       include 'import_gamess_os_1e_grad_common.f90'
     end subroutine os_1e_grad_quad
@@ -2542,7 +2618,7 @@
       real(rk), intent(in)   :: r_l(:)              ! Centre of the left b.f.
       real(rk), intent(in)   :: z_l                 ! Orbital exponent of the left b.f.
       real(rk), intent(in)   :: r_r(:)              ! ditto, for the right b.f.
-      real(rk), intent(in)   :: z_r                 ! 
+      real(rk), intent(in)   :: z_r                 !
       !
       include 'import_gamess_os_1e_rddr_common.f90'
     end subroutine os_1e_rddr_real
@@ -2557,7 +2633,7 @@
       real(xrk), intent(in)   :: r_l(:)              ! Centre of the left b.f.
       real(xrk), intent(in)   :: z_l                 ! Orbital exponent of the left b.f.
       real(xrk), intent(in)   :: r_r(:)              ! ditto, for the right b.f.
-      real(xrk), intent(in)   :: z_r                 ! 
+      real(xrk), intent(in)   :: z_r                 !
       !
       include 'import_gamess_os_1e_rddr_common.f90'
     end subroutine os_1e_rddr_quad
@@ -2573,7 +2649,7 @@
       real(rk), intent(in)   :: r_l(:)              ! Centre of the left b.f.
       real(rk), intent(in)   :: z_l                 ! Orbital exponent of the left b.f.
       real(rk), intent(in)   :: r_r(:)              ! ditto, for the right b.f.
-      real(rk), intent(in)   :: z_r                 ! 
+      real(rk), intent(in)   :: z_r                 !
       !
       include 'import_gamess_os_1e_kinetic_common.f90'
     end subroutine os_1e_kinetic_real
@@ -2587,7 +2663,7 @@
       real(xrk), intent(in)   :: r_l(:)              ! Centre of the left b.f.
       real(xrk), intent(in)   :: z_l                 ! Orbital exponent of the left b.f.
       real(xrk), intent(in)   :: r_r(:)              ! ditto, for the right b.f.
-      real(xrk), intent(in)   :: z_r                 ! 
+      real(xrk), intent(in)   :: z_r                 !
       !
       include 'import_gamess_os_1e_kinetic_common.f90'
     end subroutine os_1e_kinetic_quad
@@ -2606,7 +2682,7 @@
       real(rk), intent(in)    :: r_l(:)                      ! Centre of the left b.f.
       real(rk), intent(in)    :: z_l                         ! Orbital exponent of the left b.f.
       real(rk), intent(in)    :: r_r(:)                      ! ditto, for the right b.f.
-      real(rk), intent(in)    :: z_r                         ! 
+      real(rk), intent(in)    :: z_r                         !
       !
       include 'import_gamess_os_1e_3c_common.f90'
     end subroutine os_1e_3c_real
@@ -2620,13 +2696,13 @@
       real(xrk), intent(in)    :: r_l(:)                      ! Centre of the left b.f.
       real(xrk), intent(in)    :: z_l                         ! Orbital exponent of the left b.f.
       real(xrk), intent(in)    :: r_r(:)                      ! ditto, for the right b.f.
-      real(xrk), intent(in)    :: z_r                         ! 
+      real(xrk), intent(in)    :: z_r                         !
       !
       include 'import_gamess_os_1e_3c_common.f90'
     end subroutine os_1e_3c_quad
     !
     !  4-centre 2-electron integrals
-    !  We follow the Ahlrichs' PCCP paper. However, instead of using the transfer relations, 
+    !  We follow the Ahlrichs' PCCP paper. However, instead of using the transfer relations,
     !  advocated by that paper, we directly use the general recursion formula (31).
     !  This is less computationally efficient than the Ahlrichs' preferred route, but
     !  avoids the need for extending our data tables in gamess_internal.f90.
@@ -2749,7 +2825,7 @@
       real(rk), intent(in)            :: r_l(:)  ! Centre of the left b.f.
       real(rk), intent(in)            :: z_l     ! Orbital exponent of the left b.f.
       real(rk), intent(in)            :: r_r(:)  ! ditto, for the right b.f.
-      real(rk), intent(in)            :: z_r     ! 
+      real(rk), intent(in)            :: z_r     !
       real(rk), intent(out), optional :: xi      ! Eq. 13 of Obara-Saika
       real(rk), intent(out), optional :: zeta    ! Eq. 14
       real(rk), intent(out), optional :: p(:)    ! Eq. 15
@@ -2765,7 +2841,7 @@
       real(xrk), intent(in)            :: r_l(:)  ! Centre of the left b.f.
       real(xrk), intent(in)            :: z_l     ! Orbital exponent of the left b.f.
       real(xrk), intent(in)            :: r_r(:)  ! ditto, for the right b.f.
-      real(xrk), intent(in)            :: z_r     ! 
+      real(xrk), intent(in)            :: z_r     !
       real(xrk), intent(out), optional :: xi      ! Eq. 13 of Obara-Saika
       real(xrk), intent(out), optional :: zeta    ! Eq. 14
       real(xrk), intent(out), optional :: p(:)    ! Eq. 15

@@ -229,7 +229,7 @@ module math
     cnm = exp(real(MathLogGamma(n+one)-MathLogGamma(n-m+one)-MathLogGamma(m+one),kind=rk))
   end function MathBinomialReal
   !
-  !  Evaluate log(exp(a)+exp(b)), where a and b may be too large to fit 
+  !  Evaluate log(exp(a)+exp(b)), where a and b may be too large to fit
   !  in the exponent range.
   !
   function MathLogSum(a,b) result(c)
@@ -331,7 +331,7 @@ module math
   !
   function Math3J(j1,j2,j3,m1,m2,m3) result(v)
     integer(ik), intent(in) :: j1, j2, j3  ! / J1 J2 J3 \ 3-j
-    integer(ik), intent(in) :: m1, m2, m3  ! \ M1 M2 M3 / 
+    integer(ik), intent(in) :: m1, m2, m3  ! \ M1 M2 M3 /
     real(rk)                :: v
     !
     integer(ik) :: ij0, ij1, ij2, ij3, im1a, im1b, im2a, im2b, im3a, im3b
@@ -383,7 +383,7 @@ module math
     !
   end function Math3J
   !
-  !  Given Euler angles, construct rotation matrix for coordinate axes 
+  !  Given Euler angles, construct rotation matrix for coordinate axes
   !  in 3D space.  The Euler angles are defined as follows:
   !   1. Rotate coordinate axes by alpha around the Z axis
   !   2. Rotate axes by beta around the new Y axis
@@ -391,7 +391,7 @@ module math
   !  This definition of the Euler angles matches the definition from
   !  section 58 of L&L III.
   !
-  !  Note that prior to June 10th, 2010 the definition of all three Euler 
+  !  Note that prior to June 10th, 2010 the definition of all three Euler
   !  angles in this routine used a wrong sign, corresponding to anti-screw
   !  rotation sense. Thanks, Mike.
   !
@@ -401,13 +401,13 @@ module math
   !
   !  Some useful special cases are:
   !
-  !    a     b     c  
-  !   ---   ---   --- 
+  !    a     b     c
+  !   ---   ---   ---
   !    x     0     0   Rotate coordinate system by x around the Z axis
   !    0     0     x   Rotate coordinate system by x around the Z axis
   !    0     x     0   Rotate coordinate system by x around the Y axis
   !  -pi/2   x   pi/2  Rotate coordinate system by x around the X axis
-  !      
+  !
   subroutine MathRotationMatrix(euler_angles,mat)
     real(ark), intent(in)  :: euler_angles(3) ! Euler rotation angles: alpha, beta, and gamma
     real(ark), intent(out) :: mat(3,3)        ! Rotation matrix
@@ -443,7 +443,7 @@ module math
   !  Note that the rotation matrix uses somewhat weird conventions: it rotates transposed
   !  harmonics from the primed coordinate system defined by the Euler angles back into
   !  the lab system:
-  !  
+  !
   !    Y(L,M) = Sum Y(L,M') D(M',M)
   !
   !  Furthermore, it looks like the expression for the Wigner matrix in the 5th Russian
@@ -476,7 +476,7 @@ module math
     g = euler_angles(3)
     !
     !  We need to take special care when angle beta approaches n*pi. For these angles,
-    !  
+    !
     !
     sinb2 = sin(0.5_ark*b)
     cosb2 = cos(0.5_ark*b)
@@ -514,7 +514,7 @@ module math
     !    y^a x^b JacobiP(n,a,b,x^2-y^2)
     !
     !  where x^2+y^2 is equal to 1. Care should be taken in evaluating this function
-    !  when either a or b are negative: standard recursion with respect to degree 
+    !  when either a or b are negative: standard recursion with respect to degree
     !  becomes undefined in this case.
     !
     !  As the result, we have to use series expansion around +1/-1 argument to
@@ -538,7 +538,7 @@ module math
         end do expand_plus1
         jp = x**b * jp / MathFactorial(n)
 !       write (out,"(a,3(1x,i3),3(1x,f35.25))") 'A: ',n,a,b,y,x,jp
-      else 
+      else
         !
         !  Small x, expand JacobiP around z=-1
         !
@@ -567,7 +567,7 @@ module math
     integer(ik) :: i
     !
     if (size(m,dim=1)/=size(m,dim=2)) then
-      write (out,"('math%MathSetUnitMatrix - argument is not a square matrix?!')") 
+      write (out,"('math%MathSetUnitMatrix - argument is not a square matrix?!')")
       stop 'math%MathSetUnitMatrix - argument is not a square matrix?!'
     end if
     !
@@ -583,7 +583,7 @@ module math
     integer(ik) :: i
     !
     if (size(m,dim=1)/=size(m,dim=2)) then
-      write (out,"('math%MathSetUnitMatrix - argument is not a square matrix?!')") 
+      write (out,"('math%MathSetUnitMatrix - argument is not a square matrix?!')")
       stop 'math%MathSetUnitMatrix - argument is not a square matrix?!'
     end if
     !
@@ -599,7 +599,7 @@ module math
     real(ark), intent(in) :: m(:,:) ! Matrix to check
     logical               :: isunit
     !
-    real(kind=kind(m))    :: eps 
+    real(kind=kind(m))    :: eps
     integer(ik)           :: i, j
     !
     eps = spacing(real(2,kind=kind(m)))
@@ -622,7 +622,7 @@ module math
     real(xrk), intent(in) :: m(:,:) ! Matrix to check
     logical               :: isunit
     !
-    real(kind=kind(m))    :: eps 
+    real(kind=kind(m))    :: eps
     integer(ik)           :: i, j
     !
     eps = spacing(real(2,kind=kind(m)))
@@ -721,7 +721,7 @@ module math
         mu0 = real(MathSimpleGamma(cmplx(1._rk + alpha,0._rk,kind=rk)),kind=rk)
     end select
     !
-    call lapack_stev(a,b,z)  
+    call lapack_stev(a,b,z)
     !
     !  Copy integration abscissas and weights, and we are done
     !
@@ -922,7 +922,7 @@ module math
     !
     allocate (factorial_table(0:nmax),stat=alloc)
     if (alloc/=0) then
-      write (out,"('Error ',i10,' allocating ',i10,'-element factorial table')") & 
+      write (out,"('Error ',i10,' allocating ',i10,'-element factorial table')") &
              alloc, nmax
       stop 'math%fill_factorial_table - allocate'
     end if
@@ -964,7 +964,7 @@ module math
     !
     allocate (factorial_quad_table(0:nmax),stat=alloc)
     if (alloc/=0) then
-      write (out,"('Error ',i10,' allocating ',i10,'-element factorial table')") & 
+      write (out,"('Error ',i10,' allocating ',i10,'-element factorial table')") &
              alloc, nmax
       stop 'math%fill_factorial_quad_table - allocate'
     end if
@@ -1006,7 +1006,7 @@ module math
     !
     allocate (log_factorial_table(0:nmax),stat=alloc)
     if (alloc/=0) then
-      write (out,"('Error ',i10,' allocating ',i10,'-element log-factorial table')") & 
+      write (out,"('Error ',i10,' allocating ',i10,'-element log-factorial table')") &
              alloc, nmax
       stop 'math%fill_log_factorial_table - allocate'
     end if
@@ -1044,7 +1044,7 @@ module math
     !
     allocate (log_factorial_quad_table(0:nmax),stat=alloc)
     if (alloc/=0) then
-      write (out,"('Error ',i10,' allocating ',i10,'-element log-factorial table')") & 
+      write (out,"('Error ',i10,' allocating ',i10,'-element log-factorial table')") &
              alloc, nmax
       stop 'math%fill_log_factorial_quad_table - allocate'
     end if
@@ -1078,7 +1078,7 @@ module math
     !
     allocate (dfactorial_table(-1:nmax),stat=alloc)
     if (alloc/=0) then
-      write (out,"('Error ',i10,' allocating ',i10,'-element double factorial table')") & 
+      write (out,"('Error ',i10,' allocating ',i10,'-element double factorial table')") &
              alloc, nmax
       stop 'math%fill_dfactorial_table - allocate'
     end if
@@ -1115,7 +1115,7 @@ module math
     !
     allocate (dfactorial_quad_table(-1:nmax),stat=alloc)
     if (alloc/=0) then
-      write (out,"('Error ',i10,' allocating ',i10,'-element double factorial table')") & 
+      write (out,"('Error ',i10,' allocating ',i10,'-element double factorial table')") &
              alloc, nmax
       stop 'math%fill_dfactorial_quad_table - allocate'
     end if
@@ -1152,7 +1152,7 @@ module math
     !
     allocate (log_dfactorial_table(-1:nmax),stat=alloc)
     if (alloc/=0) then
-      write (out,"('Error ',i10,' allocating ',i10,'-element log-double factorial table')") & 
+      write (out,"('Error ',i10,' allocating ',i10,'-element log-double factorial table')") &
              alloc, nmax
       stop 'math%fill_log_dfactorial_table - allocate'
     end if
@@ -1214,7 +1214,7 @@ module math
     ! write (out,"(' zcut = ',f25.15)") zcut
     logs = 0._rk
     zr   = z
-    inflate_z: do while(abs(zr)<zcut) 
+    inflate_z: do while(abs(zr)<zcut)
       logs = logs + log(zr*(zr+1)*(zr+2))
       zr   = zr + 3
     end do inflate_z
@@ -1242,7 +1242,7 @@ module math
     v = erf (x)
   end function MathErf
   !
-  !  MathBoysF implements the integral of x**(2*n)*Exp(-t*x**2) for x between 0 and 1. 
+  !  MathBoysF implements the integral of x**(2*n)*Exp(-t*x**2) for x between 0 and 1.
   !  Depending on the arguments, the implementation will switch between:
   !   a. (large t) Asymptotic form of the integral (with the upper bound replaced by infinity)
   !   b. (small t) Explicit power series
@@ -1268,7 +1268,7 @@ module math
     integer(ik)            :: safe_n            ! Min. order safe for explict summation
     real(rk)               :: safe_f            ! Boys' function for the safe order
     real(rk)               :: safe_f_term       ! Current term in the Boys' function
-    integer(ik)            :: i                 ! 
+    integer(ik)            :: i                 !
     !
     !  Try to use the asymptotic formula first
     !
@@ -1336,7 +1336,7 @@ module math
     integer(ik)            :: safe_n            ! Min. order safe for explict summation
     real(xrk)              :: safe_f            ! Boys' function for the safe order
     real(xrk)              :: safe_f_term       ! Current term in the Boys' function
-    integer(ik)            :: i                 ! 
+    integer(ik)            :: i                 !
     !
     !  Try to use the asymptotic formula first
     !
@@ -1392,11 +1392,11 @@ module math
     g = sqrt(pi_xrk) * MathDoubleFactorial(2*n-1,g) / 2._xrk**n
   end function gamma_n_plus_half_quad
   !
-  !  Determinant and inverse of a 3x3 matrix are so common that it makes 
+  !  Determinant and inverse of a 3x3 matrix are so common that it makes
   !  sense to code these explicitly. See lapack.f90 for the general case.
   !
   function MathDet3x3Real(m) result(d)
-    real(rk), intent(in) :: m(3,3) ! Matrix for which we need the determinant; 
+    real(rk), intent(in) :: m(3,3) ! Matrix for which we need the determinant;
                                    ! it seems wasteful to call general routines in lapack.f90 for this.
     real(rk)             :: d
     !
@@ -1421,7 +1421,7 @@ module math
   end function MathInv3x3Real
   !
   function MathDet3x3Complex(m) result(d)
-    complex(rk), intent(in) :: m(3,3) ! Matrix for which we need the determinant; 
+    complex(rk), intent(in) :: m(3,3) ! Matrix for which we need the determinant;
                                       ! it seems wasteful to call general routines in lapack.f90 for this.
     complex(rk)             :: d
     !
@@ -1466,7 +1466,7 @@ module math
   !
   function MathDawsonF(z) result(f)
     real(rk), intent(in)   :: z ! Argument to evaluate Dawson's integral for
-    real(rk)               :: f 
+    real(rk)               :: f
     !
     real(rk), parameter    :: magic_h = 1.03517084701_rk      ! pi/(2*sqrt(log(10.)))
     real(rk), parameter    :: sqrt_nn = 6._rk                 ! sqrt(number of significant digits desired)
@@ -1488,7 +1488,7 @@ module math
     real(rk)    :: z2    ! z**2
     real(rk)    :: zcorr ! z - n0*h
     real(rk)    :: n0    ! Central value of n, giving the largest term in the sum
-                         ! This needs to be real to avoid an integer overflow for 
+                         ! This needs to be real to avoid an integer overflow for
                          ! large arguments
     real(rk)    :: n
     integer(ik) :: dn

@@ -2,7 +2,7 @@
 !     real(ark), intent(in)            :: r_l(:)  ! Centre of the left b.f.
 !     real(ark), intent(in)            :: z_l     ! Orbital exponent of the left b.f.
 !     real(ark), intent(in)            :: r_r(:)  ! ditto, for the right b.f.
-!     real(ark), intent(in)            :: z_r     ! 
+!     real(ark), intent(in)            :: z_r     !
 !     real(ark), intent(out), optional :: xi      ! Eq. 13 of Obara-Saika
 !     real(ark), intent(out), optional :: zeta    ! Eq. 14
 !     real(ark), intent(out), optional :: p(:)    ! Eq. 15

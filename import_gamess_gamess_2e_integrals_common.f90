@@ -10,7 +10,7 @@
 !                                                                      ! molecule - not that this is hard for an AO integral
 !     real(rk), intent(in), optional                    :: op_param(:) ! Additional parameters for the operator
 !     real(rk), intent(in), optional                    :: accuracy    ! Desired accuracy of the integrals; contributions
-!                                                                      ! smaller than this can be neglected. 
+!                                                                      ! smaller than this can be neglected.
 !                                                                      ! The default is to be as accurate as possible.
 !                                                                      ! Negative accuracy will restore the default behaviour
 !     !
@@ -43,10 +43,10 @@
       !
       !  Fill out structure pointers
       !
-      g_a => gam_def ; if (present(a)) g_a => a 
-      g_b => gam_def ; if (present(b)) g_b => b 
-      g_c => gam_def ; if (present(c)) g_c => c 
-      g_d => gam_def ; if (present(d)) g_d => d 
+      g_a => gam_def ; if (present(a)) g_a => a
+      g_b => gam_def ; if (present(b)) g_b => b
+      g_c => gam_def ; if (present(c)) g_c => c
+      g_d => gam_def ; if (present(d)) g_d => d
       !
       !  Allocate local buffers for the exponents and contraction coefficients within the batch
       !
@@ -84,7 +84,7 @@
           !  All parameter-free integrals in os_basic_integral, including:
           !
           !  'AO 4C DELTA'     - Delta-function of r12 (I know it's silly)
-          !                    - It actually isn't - we can use this primitive to compute 
+          !                    - It actually isn't - we can use this primitive to compute
           !                      4-centre 1-electron overlap.
           !  'AO 4C ONE'       - Very complicated implementation of the product of two
           !                      overlap integrals

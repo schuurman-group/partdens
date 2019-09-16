@@ -60,7 +60,7 @@ module lapack
   interface lapack_svd
      module procedure lapack_dgesvd
      module procedure lapack_zgesvd
-  end interface lapack_svd  
+  end interface lapack_svd
 
   interface lapack_gesv
      module procedure lapack_zgesv
@@ -92,7 +92,7 @@ module lapack
     real(srk)    :: rwork( 5*min(size(a,dim=1),size(a,dim=2)))
     integer      :: rank, info           ! Must be of default integer kind
     integer      :: na1, na2, nb1, nb2   ! Must be of default integer kind
-    
+
     na1 = size(a,dim=1) ; na2 = size(a,dim=2)
     nb1 = size(b,dim=1) ; nb2 = size(b,dim=2)
     call cgelss(na1,na2,nb2,a(1:na1,1:na2),na1,b(1:nb1,1:nb2),nb1, &
@@ -114,7 +114,7 @@ module lapack
     real(drk)         :: rwork( 5*min(size(a,dim=1),size(a,dim=2)))
     integer           :: rank, info         ! Must be of default integer kind
     integer           :: na1, na2, nb1, nb2 ! Must be of default integer kind
-    
+
     na1 = size(a,dim=1) ; na2 = size(a,dim=2)
     nb1 = size(b,dim=1) ; nb2 = size(b,dim=2)
     call zgelss(na1,na2,nb2,a(1:na1,1:na2),na1,b(1:nb1,1:nb2),nb1, &
@@ -129,7 +129,7 @@ module lapack
 !*qd subroutine lapack_quad_zgelss(a,b)
 !*qd  complex(qrk), intent(inout) :: a(:,:)
 !*qd  complex(qrk), intent(inout) :: b(:,:)
-!*qd  
+!*qd
 !*qd  external quad_zgelss
 !*qd  real(qrk)    :: s    (   min(size(a,dim=1),size(a,dim=2)))
 !*qd  complex(qrk) :: work (50*max(size(a,dim=1),size(a,dim=2)))
@@ -137,13 +137,13 @@ module lapack
 !*qd  real(qrk)    :: eps
 !*qd  integer      :: rank, info          ! Must be of default integer kind
 !*qd  integer      :: na1, na2, nb1, nb2  ! Must be of default integer kind
-!*qd 
+!*qd
 !*qd  na1 = size(a,dim=1) ; na2 = size(a,dim=2)
 !*qd  nb1 = size(b,dim=1) ; nb2 = size(b,dim=2)
 !*qd  eps = 100*spacing(eps)
 !*qd  call quad_zgelss(na1,na2,nb2,a(1:na1,1:na2),na1,b(1:nb1,1:nb2),nb1, &
 !*qd                   s, eps, rank, work, size(work), rwork, info)
-!*qd  
+!*qd
 !*qd  if (info/=0) then
 !*qd    write (out,"(' quad_cgelss returned ',i8)") info
 !*qd    stop 'lapack_quad_cgelss - quad_cgelss failed'
@@ -159,7 +159,7 @@ module lapack
     real(srk) :: work (50*max(size(a,dim=1),size(a,dim=2),size(b,dim=2)))
     integer   :: rank, info          ! Must be of default integer kind
     integer   :: na1, na2, nb1, nb2  ! Must be of default integer kind
-    
+
     na1 = size(a,dim=1) ; na2 = size(a,dim=2)
     nb1 = size(b,dim=1) ; nb2 = size(b,dim=2)
     call sgelss(na1,na2,nb2,a(1:na1,1:na2),na1,b(1:nb1,1:nb2),nb1, &
@@ -180,7 +180,7 @@ module lapack
     real(drk) :: work (50*max(size(a,dim=1),size(a,dim=2),size(b,dim=2)))
     integer   :: rank, info         ! Must be of default integer kind
     integer   :: na1, na2, nb1, nb2 ! Must be of default integer kind
-    
+
     na1 = size(a,dim=1) ; na2 = size(a,dim=2)
     nb1 = size(b,dim=1) ; nb2 = size(b,dim=2)
     call dgelss(na1,na2,nb2,a(1:na1,1:na2),na1,b(1:nb1,1:nb2),nb1, &
@@ -195,13 +195,13 @@ module lapack
 !*qd subroutine lapack_quad_dgelss(a,b)
 !*qd  real(qrk), intent(inout) :: a(:,:)
 !*qd  real(qrk), intent(inout) :: b(:,:)
-  
+
 !*qd  external quad_dgelss
 !*qd  real(qrk) :: s    (   min(size(a,dim=1),size(a,dim=2)))
 !*qd  real(qrk) :: work (50*max(size(a,dim=1),size(a,dim=2),size(b,dim=2)))
 !*qd  integer   :: rank, info         ! Must be of default integer kind
 !*qd  integer   :: na1, na2, nb1, nb2 ! Must be of default integer kind
-!*qd  
+!*qd
 !*qd  na1 = size(a,dim=1) ; na2 = size(a,dim=2)
 !*qd  nb1 = size(b,dim=1) ; nb2 = size(b,dim=2)
 !*qd  call quad_dgelss(na1,na2,nb2,a(1:na1,1:na2),na1,b(1:nb1,1:nb2),nb1, &
@@ -254,7 +254,7 @@ module lapack
   end subroutine lapack_dsysv
 
   subroutine lapack_sstev(d,e,z)
-    real(srk), intent(inout) :: d(:)   ! In:  Diagonal elements of the matrix 
+    real(srk), intent(inout) :: d(:)   ! In:  Diagonal elements of the matrix
                                        ! Out: Eigenvalues, ascending order
     real(srk), intent(inout) :: e(:)   ! In:  Sub-/super-diagonal elements of the matrix
                                        ! Out: Destroyed
@@ -263,7 +263,7 @@ module lapack
     real(srk) :: work(max(1,2*size(d)-2))
     integer   :: info      ! Must be of default integer kind
     integer   :: nz1, nz2  ! Must be of default integer kind
-    
+
     nz1 = size(z,dim=1) ; nz2 = size(z,dim=2)
     call sstev('V',size(d),d,e,z(1:nz1,1:nz2),nz1,work,info)
 
@@ -274,7 +274,7 @@ module lapack
   end subroutine lapack_sstev
 
   subroutine lapack_dstev(d,e,z)
-    real(drk), intent(inout) :: d(:)   ! In:  Diagonal elements of the matrix 
+    real(drk), intent(inout) :: d(:)   ! In:  Diagonal elements of the matrix
                                               ! Out: Eigenvalues, ascending order
     real(drk), intent(inout) :: e(:)   ! In:  Sub-/super-diagonal elements of the matrix
                                               ! Out: Destroyed
@@ -283,7 +283,7 @@ module lapack
     real(drk) :: work(max(1,2*size(d)-2))
     integer   :: info      ! Must be of default integer kind
     integer   :: nz1, nz2  ! Must be of default integer kind
-    
+
     nz1 = size(z,dim=1) ; nz2 = size(z,dim=2)
     call dstev('V',size(d),d,e,z(1:nz1,1:nz2),nz1,work,info)
 
@@ -304,7 +304,7 @@ module lapack
     complex(srk) :: vr(size(h,dim=2),size(h,dim=2))
     integer      :: info      ! Must be of default integer kind
     integer      :: nh1, nh2  ! Must be of default integer kind
-    
+
     nh1 = size(h,dim=1) ; nh2 = size(h,dim=2)
     call cgeev('N','V',nh2,h(1:nh1,1:nh2),nh1,e(:),vl,1,vr,nh2,work,size(work),rwork,info)
     if (info/=0) then
@@ -325,7 +325,7 @@ module lapack
     complex(kind=drk) :: vr(size(h,dim=2),size(h,dim=2))
     integer           :: info     ! Must be of default integer kind
     integer           :: nh1, nh2 ! Must be of default integer kind
-    
+
     nh1 = size(h,dim=1) ; nh2 = size(h,dim=2)
     call zgeev('N','V',nh2,h(1:nh1,1:nh2),nh1,e(:),vl,1,vr,nh2,work,size(work),rwork,info)
     if (info/=0) then
@@ -346,7 +346,7 @@ module lapack
     complex(kind=drk) :: vl(size(h,dim=2),size(h,dim=2))
     integer           :: info     ! Must be of default integer kind
     integer           :: nh1, nh2 ! Must be of default integer kind
-    
+
     nh1 = size(h,dim=1) ; nh2 = size(h,dim=2)
     if (nh1<nh2) stop 'lapack_zgeev2 - oops'
     call zgeev('V','V',nh2,h(1:nh1,1:nh2,1),nh1,e(:),vl,nh2,h(1:nh1,1:nh2,2),nh1,work,size(work),rwork,info)
@@ -362,13 +362,13 @@ module lapack
 !*qd                                           ! Out: h(:,:,1) = Left eigenvectors
 !*qd                                           !      h(:,:,2) = Right eigenvectors
 !*qd   complex(qrk), intent(out)   :: e(:)     ! Out: Eigenvalues
-   
+
 !*qd   complex(qrk) :: work(50*size(h,dim=2))
 !*qd   real(qrk)    :: rwork(3*size(h,dim=2))
 !*qd   complex(qrk) :: vl(size(h,dim=2),size(h,dim=2))
 !*qd   integer      :: info      ! Must be of default integer kind
 !*qd   integer      :: nh1, nh2  ! Must be of default integer kind
-!*qd   
+!*qd
 !*qd   nh1 = size(h,dim=1) ; nh2 = size(h,dim=2)
 !*qd   if (nh1<nh2) stop 'lapack%lapack_quad_zgeev2 - oops'
 !*qd   call quad_zgeev('V','V',nh2,h(1:nh1,1:nh2,1),nh1,e(:),vl,nh2,h(1:nh1,1:nh2,2),nh1,work,size(work),rwork,info)
@@ -388,7 +388,7 @@ module lapack
     real(srk)    :: rwork(3*size(h,dim=1))
     integer      :: info                   ! Must be of default integer kind
     integer      :: nh1, nh2               ! Must be of default integer kind
-    
+
     nh1 = size(h,dim=1) ; nh2 = size(h,dim=2)
     call cheev('V','U',nh1,h(1:nh1,1:nh2),nh1,e(:),work,size(work),rwork,info)
     if (info/=0) then
@@ -406,7 +406,7 @@ module lapack
     real(drk)    :: rwork(3*size(h,dim=1))
     integer      :: info            ! Must be of default integer kind
     integer      :: nh1, nh2        ! Must be of default integer kind
-    
+
     nh1 = size(h,dim=1) ; nh2 = size(h,dim=2)
     call zheev('V','U',nh1,h(1:nh1,1:nh2),nh1,e(:),work,size(work),rwork,info)
     if (info/=0) then
@@ -423,7 +423,7 @@ module lapack
     real(drk) :: work(50*size(h,dim=1))
     integer   :: info      ! Must be of default integer kind
     integer   :: nh1, nh2  ! Must be of default integer kind
-    
+
     nh1 = size(h,dim=1) ; nh2 = size(h,dim=2)
     call dsyev('V','U',nh1,h(1:nh1,1:nh2),nh1,e(:),work,size(work),info)
     if (info/=0) then
@@ -436,11 +436,11 @@ module lapack
 !*qd   real(qrk), intent(inout) :: h(:,:)  ! In:  symmetric matrix to be diagonalized
 !*qd                                       ! Out: Eigenvectors
 !*qd   real(qrk), intent(out)   :: e(:)    ! Out: Eigenvalues
-   
+
 !*qd   real(qrk) :: work(50*size(h,dim=1))
 !*qd   integer   :: info       ! Must be of default integer kind
 !*qd   integer   :: nh1, nh2   ! Must be of default integer kind
-!*qd   
+!*qd
 !*qd   nh1 = size(h,dim=1) ; nh2 = size(h,dim=2)
 !*qd   call quad_dsyev('V','U',nh1,h(1:nh1,1:nh2),nh1,e(:),work,size(work),info)
 !*qd   if (info/=0) then
@@ -457,7 +457,7 @@ module lapack
     real(srk)        :: work(50*size(h,dim=1))
     integer          :: info       ! Must be of default integer kind
     integer          :: nh1, nh2   ! Must be of default integer kind
-    
+
     nh1 = size(h,dim=1) ; nh2 = size(h,dim=2)
     call ssyev('V','U',nh1,h(1:nh1,1:nh2),nh1,e(:),work,size(work),info)
     if (info/=0) then
@@ -480,9 +480,9 @@ module lapack
     real(drk), allocatable :: work(:)
     integer                :: info, lwork                    ! Must be of default integer kind
     integer                :: m, n, lda, ldu, ldvth, nsing   ! Must be of default integer kind
-   
-    m     = size(a,dim=1) 
-    n     = size(a,dim=2) 
+
+    m     = size(a,dim=1)
+    n     = size(a,dim=2)
     lda   = m
     nsing = min(m,n)
     ldu   = size(u,dim=1)
@@ -533,9 +533,9 @@ module lapack
     real(drk)    :: rwork(5*size(a,dim=1))
     integer      :: info, lwork           ! Must be of default integer kind
     integer      :: m, n, lda, ldu, ldvth ! Must be of default integer kind
-   
+
     m     = size(a,dim=1) ; lda = m
-    n     = size(a,dim=2) 
+    n     = size(a,dim=2)
     ldu   = size(u,dim=1)
     ldvth = size(vth,dim=1)
     lwork = size(work)
@@ -611,9 +611,9 @@ module lapack
     evec  = amat
     call lapack_syev(evec(:,:),eval(:))
     eps = 100.0*spacing(maxval(eval))
-    where (abs(eval)>eps) 
+    where (abs(eval)>eps)
       eval = 1.0 / eval**power
-    elsewhere  
+    elsewhere
       eval = 0.0
     end where
     evec = evec * spread(eval,dim=1,ncopies=size(evec,dim=1))
@@ -638,9 +638,9 @@ module lapack
     evec  = amat
     call lapack_heev(evec(:,:),eval(:))
     eps = 100.0*spacing(maxval(eval))
-    where (abs(eval)>eps) 
+    where (abs(eval)>eps)
       eval = 1.0 / eval**power
-    elsewhere  
+    elsewhere
       eval = 0.0
     end where
     evec = evec * spread(eval,dim=1,ncopies=size(evec,dim=1))
@@ -665,9 +665,9 @@ module lapack
     evec = amat
     call lapack_syev(evec(:,:),eval(:))
     eps = 100.0d0*spacing(maxval(eval))
-    where (abs(eval)>eps) 
+    where (abs(eval)>eps)
       eval = 1.0d0 / eval**power
-    elsewhere  
+    elsewhere
       eval = 0.0d0
     end where
     evec = evec * spread(eval,dim=1,ncopies=size(evec,dim=1))
@@ -692,9 +692,9 @@ module lapack
     evec  = amat
     call lapack_heev(evec(:,:),eval(:))
     eps = 100.0d0*spacing(maxval(eval))
-    where (abs(eval)>eps) 
+    where (abs(eval)>eps)
       eval = 1.0d0 / eval**power
-    elsewhere  
+    elsewhere
       eval = 0.0
     end where
     evec = evec * spread(eval,dim=1,ncopies=size(evec,dim=1))

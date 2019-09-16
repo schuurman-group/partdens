@@ -90,7 +90,7 @@ program gridchg
         open(mfile, file='moldens', form='unformatted', action='write')
         open(pfile, file='dens.mol', action='write')
         norm = 0_rk
-        !nullify(xyzw)
+        nullify(xyzw)
         mol_grid_batches: do ib = 1,nbatch
             !
             !  Get grid points
@@ -170,11 +170,11 @@ program gridchg
         iat = den_grid%next_part
         normatm = 0_rk
         dcharge = 0_rk
+        !nullify(xyzw)
         grid_batches: do ib = 1,nbatch
             !
             !  Get grid points
             !
-            nullify(xyzw)
             call GridPointsBatch(den_grid, 'Next batch', xyzw=xyzw)
             !
             !  If the batch size changed, reallocate density and weight arrays
