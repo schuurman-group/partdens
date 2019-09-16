@@ -36,7 +36,7 @@ dgedi.o:	dgedi.f
 	$(CC) -c $<
 
 clean:
-	-/bin/rm -f *.{o,mod,x,il,a} checkpoint_{field,main}.* makefile.dep
+	-/bin/rm -f *.{o,mod,x,il,a} *__genmod.f90 checkpoint_{field,main}.* makefile.dep
 
 makefile.dep: $(shell echo *.f90)
 	./make-depend.sh $^ > $@

@@ -1,10 +1,10 @@
 module timer
 !
 !  Timing routines. Because of the possibility for parallel
-!  execution, potentially on two scales at the same time 
+!  execution, potentially on two scales at the same time
 !  (OpenMP and MPI), all timings are done using real time.
 !
-!  For OpenMP programs, all calls to timer routines from 
+!  For OpenMP programs, all calls to timer routines from
 !  secondary threads are silently ignored.
 !
 !  The externally visible routines are:
@@ -15,9 +15,9 @@ module timer
 !
 !  Internally, timers are implemented using a hash table and
 !  should have constant cost regardless of the number of
-!  timers. Hash implementation follows Algorthim L (linear 
-!  insertion with linear search) of chapter 6.4 of Knuth's 
-!  vol 3. Hash function is taken from Aho, Sethi, and Ullman, 
+!  timers. Hash implementation follows Algorthim L (linear
+!  insertion with linear search) of chapter 6.4 of Knuth's
+!  vol 3. Hash function is taken from Aho, Sethi, and Ullman,
 !  pp. 434-438. Because timers are persistent, there is no
 !  deletion.
 !
@@ -26,9 +26,9 @@ module timer
   private
   public TimerStart, TimerStop, TimerReport
 !
-  integer, parameter :: trk        = selected_real_kind(14)
-  integer, parameter :: table_size = 1000 ! Max number of entries to track
-  integer, parameter :: name_len   =   40 ! Max length of timer name
+  integer, parameter     :: trk        = selected_real_kind(14)  ! Must be of default integer kind
+  integer(ik), parameter :: table_size = 1000 ! Max number of entries to track
+  integer(ik), parameter :: name_len   =   40 ! Max length of timer name
 !
   type tim
     logical                 :: used       ! Slot used?
@@ -65,7 +65,7 @@ module timer
   !  Public interfaces
   !
     !
-    !  Start timing region. 
+    !  Start timing region.
     !
     subroutine TimerStart(region)
       character(len=*), intent(in) :: region  ! Timer name
@@ -102,7 +102,7 @@ module timer
       t%cpu_start  = get_cpu_time ()
     end subroutine TimerStart
     !
-    !  End timing region. 
+    !  End timing region.
     !
     subroutine TimerStop(region)
       character(len=*), intent(in) :: region  ! Timer name
@@ -161,8 +161,8 @@ module timer
     !
     subroutine TimerReport
       real(trk)          :: real_now
-      real(trk)          :: cpu_now 
-      real(trk)          :: real_time, cpu_time 
+      real(trk)          :: cpu_now
+      real(trk)          :: real_time, cpu_time
       real(trk)          :: real_kids, cpu_kids
       real(trk)          :: real_threshold
       real(trk)          :: cpu_threshold
@@ -207,14 +207,14 @@ module timer
         end if
         !
         ! Calculate active-timer corrections
-        ! 
+        !
         real_time = 0 ; real_kids = 0 ;
         cpu_time  = 0 ; cpu_kids  = 0 ;
         active     = ' '
         if (t%active) then
           real_time = real_now - t%real_start
           cpu_time  = cpu_now  - t%cpu_start
-          if (t_active/=t%stack_p) then 
+          if (t_active/=t%stack_p) then
             !
             ! If we are not at the top of the stack, adjust
             ! cumulative children time.
@@ -258,13 +258,14 @@ module timer
         if (count_bad_cpu >0) write (out,"(t5,'  CPU-time ordering violations = ',f16.0)") count_bad_cpu
       end if
       write (out,"()")
+      call flush(out)
     end subroutine TimerReport
   !
   !  Support routines
   !
     logical function omp_secondary()
     !$ use OMP_LIB
-      integer :: this_thread
+      integer :: this_thread  ! Must be of default integer kind
       !
       this_thread = 0
       !$ this_thread = omp_get_thread_num()
@@ -275,15 +276,15 @@ module timer
     !  so this code gets a little messy to handle the roll-over.
     !
     !  Furthermore, we have to make sure that get_real_time() is
-    !  time-ordered; anything else will play havoc with timing 
+    !  time-ordered; anything else will play havoc with timing
     !  routines.
     !
     function get_real_time() result(t)
       real(trk) :: t
       !
-      integer         :: count, count_rate, count_max
+      integer         :: count, count_rate, count_max ! Must be of default integer kind
       real(trk), save :: overflow   =  0
-      integer, save   :: last_count = -1
+      integer, save   :: last_count = -1   ! Must be of default integer kind
       real(trk), save :: last_time  = -1   ! Initialize to an impossible small value
       !
       call system_clock(count,count_rate,count_max)
@@ -400,11 +401,14 @@ module timer
       !
     end function insert_item
     !
+    !  Function below must use at least 29-bit integers. We'll stick
+    !  to the default kind.
+    !
     integer function string_hash(str) result(h)
       character(len=*), intent(in) :: str
 !
       integer :: i, chr, g
-      integer :: mask 
+      integer :: mask
       data mask/Z"1FFFFFF"/
 !
 !    This hash assumes at least 29-bit integers. It is supposedly

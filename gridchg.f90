@@ -112,8 +112,8 @@ program gridchg
             !
             !  Integrate and save
             !
+            norm = norm + sum(xyzw(4,:) * rhomol)
             mol_integrate: do ipt = 1,npts
-                norm = norm + xyzw(4,ipt) * rhomol(ipt)
                 write(mfile) rhomol(ipt)
                 write(pfile,1000) xyzw(4,ipt), xyzw(1:3,ipt), rhomol(ipt)
             end do mol_integrate
@@ -167,10 +167,10 @@ program gridchg
         call update_atoms(charge, inp%max_charge, qlist, natom, iwhr, nuniq, inp%n_rad_atom, inp%atom_lib, inp%atom_type, aload, ax, aw, acden, aden)
         !call update_densmat(charge, inp%max_charge, qlist, natom, iwhr, nuniq, dload, npbas, pdens)
         call GridPointsBatch(den_grid, 'Reset')
-        iat = den_grid%iatom
+        iat = den_grid%next_part
         normatm = 0_rk
         dcharge = 0_rk
-        nullify(xyzw)
+        !nullify(xyzw)
         grid_batches: do ib = 1,nbatch
             !
             !  Get grid points
@@ -226,7 +226,7 @@ program gridchg
                 end do integrate_pop
             end if
             ! get iatom for the next shell
-            iat = den_grid%iatom
+            iat = den_grid%next_part
         end do grid_batches
         close(qfile)
         close(wfile)
