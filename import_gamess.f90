@@ -1424,6 +1424,7 @@
       !
       write (sstr,"(a,' ',a)") adjustl(trim(atom%name)), trim(basname)
       write (out,"('import_gamess: Loading external basis ',a)") trim(sstr)
+      have_basis = .false.
       scan_lines: do while (.not.have_basis)
         call gam_readline
         if (gam_line_buf==trim(sstr)) have_basis = .true.
