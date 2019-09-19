@@ -29,6 +29,9 @@ xi + xj is odd for x in {a, b, c}. Otherwise,
            prod_x (xi + xj - 1)!! / sqrt[(2xi - 1)!!(2xj - 1)!!],
 
 where li = sum_x xi.
+
+The angular component is integrated out if the flag '-a' is included,
+otherwise the density matrix is simply symmetrized and reduced.
 """
 import sys
 import numpy as np
@@ -122,51 +125,54 @@ def read_occ(fname, met='scf'):
     return occ
 
 
-def build_mats(labels):
+def build_mats(labels, ang=True):
     """Returns the angular overlap matrix and the nao->nshell transformation
     matrix based on a list of shell labels."""
     nlbl = len(labels)
-    nxyz = dict(S=get_nxyz(0), P=get_nxyz(1), D=get_nxyz(2),
-                F=get_nxyz(3), G=get_nxyz(4), H=get_nxyz(5))
 
     # find T and powers of x, y, and z
     ncart = np.empty((0, 3), dtype=int)
-    tmat = np.empty((nlbl, 0), dtype=int)
+    nblk = np.empty(0, dtype=int)
     nao = 0
     for i, l in enumerate(labels):
-        n = nxyz[l]
-        t = np.zeros((nlbl, len(n)), dtype=int)
-        t[i] = 1
-        tmat = np.hstack((tmat, t))
+        n, eq = get_nxyz(l)
         ncart = np.vstack((ncart, n))
+        if ang:
+            nblk = np.hstack((nblk, len(n)))
+        else:
+            nblk = np.hstack((nblk, eq))
+
         nao += len(n)
 
-    # fill in the lower triangular of A
-    amat = np.zeros((nao, nao))
-    for i in range(nao):
-        amat[i,i] = 1
-        for j in range(i):
-            ni = ncart[i]
-            nj = ncart[j]
-            if np.all(ni == nj):
-                amat[i,j] = 1
-            elif np.all((ni + nj) % 2 == 0):
-                li = np.sum(ni)
-                lj = np.sum(nj)
-                nij = dfac(ni + nj - 1) / np.sqrt(dfac(2*ni - 1)*dfac(2*nj - 1))
-                amat[i,j] = np.prod(nij)
-                if li != lj:
-                    amat[i,j] *= np.sqrt(dfac(2*li + 1)*dfac(2*lj + 1))
-                    amat[i,j] /= dfac(li + lj + 1)
+    if ang:
+        # fill in the lower triangular of A
+        amat = np.zeros((nao, nao))
+        for i in range(nao):
+            amat[i,i] = 1
+            for j in range(i):
+                ni = ncart[i]
+                nj = ncart[j]
+                if np.all(ni == nj):
+                    amat[i,j] = 1
+                elif np.all((ni + nj) % 2 == 0):
+                    li = np.sum(ni)
+                    lj = np.sum(nj)
+                    nij = dfac(ni + nj - 1) / np.sqrt(dfac(2*ni - 1)*dfac(2*nj - 1))
+                    amat[i,j] = np.prod(nij)
+                    if li != lj:
+                        amat[i,j] *= np.sqrt(dfac(2*li + 1)*dfac(2*lj + 1))
+                        amat[i,j] /= dfac(li + lj + 1)
 
-    # fill in the upper triangular of A
-    iu = np.triu_indices(nao, k=1)
-    il = (iu[1], iu[0])
-    amat[iu] = amat[il]
-    return amat, tmat
+        # fill in the upper triangular of A
+        iu = np.triu_indices(nao, k=1)
+        il = (iu[1], iu[0])
+        amat[iu] = amat[il]
+        return amat, nblk
+    else:
+        return 1, nblk
 
 
-def get_nxyz(n):
+def get_nxyz(lbl):
     """Returns the gamess-ordered x, y and z powers for a shell.
 
     Given l = i + j + k, i >= j >= k, the larger number is assigned to
@@ -174,10 +180,13 @@ def get_nxyz(n):
     no longer satisfied. The ordering of g and h orbitals need to be
     double-checked for consistency with gamess output.
     """
+    lxyz = dict(S=0, P=1, D=2, F=3, G=4, H=5, I=6)
+    n = lxyz[lbl]
     if n == 0:
-        return [[0, 0, 0]]
+        return [[0, 0, 0]], [1]
 
     plist = [[n, 0, 0], [0, n, 0], [0, 0, n]]
+    neq = [3]
     for i in range(n, 0, -1):
         for j in range(n - i, 0, -1):
             k = n - i - j
@@ -186,16 +195,20 @@ def get_nxyz(n):
             elif j > i:
                 continue
             elif i == j and j == k:
-                plist += [[i, j, k]]
+                plist += [[i, i, i]]
+                neq += [1]
             elif i == j:
                 plist += [[i, i, k], [i, k, i], [k, i, i]]
+                neq += [3]
             elif j == k:
                 plist += [[i, j, j], [j, i, j], [j, j, i]]
+                neq += [3]
             else:
                 plist += [[i, j, k], [i, k, j], [j, i, k],
-                          [k, i, j], [j, k, i], [k, j, i]]
+                          [j, k, i], [k, i, j], [k, j, i]]
+                neq += [6]
 
-    return plist
+    return plist, neq
 
 
 def dfac(x):
@@ -209,16 +222,32 @@ def dfac(x):
     return xfac2
 
 
-def write_densmat(f, dens, lbl, chg):
+def write_densmat(f, dens, lbl, chg, neq=None, offd=None):
     """Writes the symmetrized density matrix to an output file."""
     nblk = len(dens)
     nnum = (nblk // 5)*[5] + [nblk % 5]
 
     # write identity and number of blocks
     if chg == 0:
-        f.write('{:2s}{:3d}{:5d}\n'.format(lbl, chg, nblk))
+        f.write('{:2s}{:3d}{:4d}\n'.format(lbl, chg, nblk))
     else:
-        f.write('{:2s}{:+3d}{:5d}\n'.format(lbl, chg, nblk))
+        f.write('{:2s}{:+3d}{:4d}\n'.format(lbl, chg, nblk))
+
+    if neq is not None:
+        # write number of equivalent blocks
+        ipr = 0
+        for i, n in enumerate(nnum):
+            fmt = '  {:3d}' + n*'{:15d}' + '\n'
+            f.write(fmt.format(i+1, *neq[ipr:ipr+n]))
+            ipr += n
+
+    if offd is not None:
+        # write off-diagonal elements
+        ipr = 0
+        for i, n in enumerate(nnum):
+            fmt = '  {:3d}' + n*'{:15.8E}' + '\n'
+            f.write(fmt.format(i+1, *offd[ipr:ipr+n]))
+            ipr += n
 
     # write density matrix
     for i, d in enumerate(dens):
@@ -237,29 +266,54 @@ def main():
     else:
         method = 'scf'
 
+    integ_ang = '-a' in sys.argv
+    if integ_ang:
+        sys.argv.pop(sys.argv.index('-a'))
+
+    # read in gamess data
     stub = sys.argv[1].replace('.dat', '')
     atm, chg = read_stub(stub)
     l, c = read_mos(stub + '.dat', met=method)
     n = read_occ(stub + '.out', met=method)
-    ang, tra = build_mats(l)
+    nao = len(c)
 
-    ## print A
-    #nao = len(ang)
-    #for a in ang:
-    #    fmt = nao*'{:6.2f}'
-    #    print(fmt.format(*a))
+    # get A and numbers of equivalent AOs
+    ang, neqiv = build_mats(l, ang=integ_ang)
+    nblk = len(neqiv)
+    tra = np.zeros((nblk, nao), dtype=int)
+    iao = 0
+    for i, eq in enumerate(neqiv):
+        tra[i,iao:iao+eq] = 1
+        iao += eq
 
     # form D and reduce it to D_r
-    d = np.dot(c.T*n, c)
-    dr = np.dot(tra, np.dot(d*ang, tra.T))
+    da = ang*np.dot(c.T*n, c)
+    dr = np.dot(tra, np.dot(da, tra.T))
+
+    if integ_ang:
+        neqiv = None
+        od = None
+        sumdr = np.sum(dr)
+    else:
+        od = np.zeros(nblk)
+        iao = 0
+        for i, eq in enumerate(neqiv):
+            dr[i,i] = np.sum(np.diag(da[iao:iao+eq,iao:iao+eq]))
+            od[i] = np.sum(np.tril(da[iao:iao+eq,iao:iao+eq], k=-1))
+            iao += eq
+
+        sumdr = np.sum(dr) + 2*np.sum(od)
 
     # check values of D_r
-    if np.sum(dr) < np.sum(n) or np.trace(dr) > np.sum(n):
-        raise ValueError('Values of D_r not within correct bounds ' +
-                         'for Tr(D_r R) = {:6.2f}'.format(np.sum(n)))
+    if not np.isclose(np.sum(da), sumdr):
+        raise ValueError('Sum of D_r not conserved ' +
+                         '({:10.3e},{:10.3e})'.format(np.sum(da), sumdr))
+    if not np.isclose(np.trace(da), np.trace(dr)):
+        raise ValueError('Trace of D_r not conserved ' +
+                         '({:10.3e},{:10.3e})'.format(np.trace(da), np.trace(dr)))
 
     # output D_r
-    write_densmat(sys.stdout, dr, atm, chg)
+    write_densmat(sys.stdout, dr, atm, chg, neq=neqiv, offd=od)
 
 
 if __name__ == '__main__':
