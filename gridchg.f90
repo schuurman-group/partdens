@@ -21,9 +21,9 @@ program gridchg
     character(2),allocatable :: atypes(:)
     logical,allocatable      :: dload(:,:)
     integer(ik)              :: ofile, mfile, pfile, qfile, wfile
-    integer(ik)              :: i, j, ib, ipt, iter, npts, iat
+    integer(ik)              :: i, ib, ipt, iter, npts, iat
     integer(ik)              :: nat_count, natom, nbatch, nuniq
-    integer(ik),allocatable  :: iwhr(:), qlist(:), npbas(:)
+    integer(ik),allocatable  :: iwhr(:), qlist(:), npshell(:)
     real(rk)                 :: norm, normatm, tmp_nat_occ(1000)
     real(rk),pointer         :: xyzw(:,:), xyz(:,:)
     real(rk),allocatable     :: xyzq(:,:), awgt(:,:)
@@ -69,7 +69,7 @@ program gridchg
     call gamess_load_orbitals(file=trim(inp%orb_fname), structure=mol)
 
     allocate (atypes(mol%natoms), xyzq(4,mol%natoms), iwhr(mol%natoms))
-    allocate (charge(mol%natoms), dcharge(mol%natoms), npbas(mol%natoms))
+    allocate (charge(mol%natoms), dcharge(mol%natoms), npshell(mol%natoms))
 
     call gamess_report_nuclei(natom, xyzq, mol)
     write(ofile,'("Molecular geometry (in bohr):")')
@@ -84,10 +84,10 @@ program gridchg
     promol = mol
     call gamess_reload_basis(file=extbas, basname=inp%abas, structure=promol)
     do i = 1,promol%natoms
-        npbas(i) = 0
-        do j = 1,promol%atoms(i)%nshell
-            npbas(i) = npbas(i) + gam_orbcnt(promol%atoms(i)%sh_l(j))
-        end do
+        npshell(i) = promol%atoms(i)%nshell
+        !do j = 1,promol%atoms(i)%nshell
+        !    npbas(i) = npbas(i) + gam_orbcnt(promol%atoms(i)%sh_l(j))
+        !end do
     end do
     !
     !  Set up the grid
@@ -145,8 +145,9 @@ program gridchg
     write(ofile,'("Calculating radial atomic grid")')
     write(ofile,'("")')
     call unique(int(xyzq(4,:)), natom, iwhr, nuniq)
-    allocate (qlist(nuniq), pdens(mol%nbasis,mol%nbasis))
-    allocate (dload(2*inp%max_charge+1,nuniq), aden(maxval(npbas),maxval(npbas),2*inp%max_charge+1,nuniq))
+    allocate (qlist(nuniq), pdens(sum(npshell),sum(npshell)))
+    allocate (dload(2*inp%max_charge+1,nuniq))
+    allocate (aden(maxval(npshell),maxval(npshell),2*inp%max_charge+1,nuniq))
     qlist = unique_list(int(xyzq(4,:)), natom, iwhr, nuniq)
 
     !
@@ -175,7 +176,7 @@ program gridchg
         !
         !  Set up the radial atomic densities (only pro or hirsh?)
         !
-        call update_densmat(charge, inp%max_charge, qlist, natom, iwhr, nuniq, aden, dload, npbas, pdens)
+        call update_densmat(charge, inp%max_charge, qlist, natom, iwhr, nuniq, aden, dload, npshell, pdens)
         call GridPointsBatch(den_grid, 'Reset')
         iat = den_grid%next_part
         normatm = 0_rk
@@ -197,7 +198,7 @@ program gridchg
             !
             !  Evaluate atomic densities at grid points if necessary
             !
-            call evaluate_atomic(xyzw(1:3,:), npts, promol, pdens, npbas, natom, rhoatm)
+            call evaluate_atomic(xyzw(1:3,:), npts, promol, pdens, npshell, natom, rhoatm)
             rhopro = sum(rhoatm, dim=1)
             !
             !  Read in molecular densities and determine atomic assignments
@@ -241,18 +242,18 @@ program gridchg
         close(wfile)
         charge = charge + dcharge
 
+        write(ofile,'("Total atomic density: ",f14.8)') normatm ! only for pro?
+        write(ofile,'("Total change in charge: ",f14.8)') sum(dcharge)
+        write(ofile,'("Contributions:")')
+        write(ofile,'("    ",5f14.8)') dcharge
+        write(ofile,'("")')
+
         do i = 1,natom
             if (charge(i) > qlist(iwhr(i))) then
                 write(ofile,'("iterate_chg: Charge of ",f8.3," for atom ",i3," exceeds nuclear charge")') charge(i), i
                 stop "iterate_chg - atomic charge exceeds nuclear charge"
             end if
         end do
-
-        write(ofile,'("Total atomic density: ",f14.8)') normatm ! only for pro?
-        write(ofile,'("Total change in charge: ",f14.8)') sum(dcharge)
-        write(ofile,'("Contributions:")')
-        write(ofile,'("    ",5f14.8)') dcharge
-        write(ofile,'("")')
 
         if (inp%atom_type == "pop") then
             write(ofile,'("Final charges:")')
@@ -386,54 +387,54 @@ end subroutine evaluate_density
 !
 !  Determine the analytic atomic densities at grid XYZ coordinates
 !
-subroutine evaluate_atomic(xyz, npt, pmol, dmat, nbas, natm, rho)
+subroutine evaluate_atomic(xyz, npt, pmol, dmat, nsh, natm, rho)
     integer(ik),intent(in)            :: natm, npt
-    integer(ik),intent(in)            :: nbas(natm)
+    integer(ik),intent(in)            :: nsh(natm)
     type(gam_structure),intent(inout) :: pmol
     real(rk),intent(in)               :: xyz(3,npt)
-    real(ark),intent(in)              :: dmat(sum(nbas),sum(nbas),natm)
+    real(ark),intent(in)              :: dmat(sum(nsh),sum(nsh))
     real(ark),intent(out)             :: rho(natm,npt)
     !
-    integer(ik)           :: iat, ipt, ibas
-    real(ark)             :: basval(1,sum(nbas),npt)
+    integer(ik)           :: iat, ipt, ish
+    real(ark)             :: shlval(1,sum(nsh),npt)
     real(ark),allocatable :: ptval(:), admat(:,:)
 
     ! evaluate basis functions
     evaluate_basis_functions: do ipt = 1,npt
-        call gamess_evaluate_functions(xyz(:,ipt), basval(:,:,ipt), pmol)
+        call gamess_evaluate_functions(xyz(:,ipt), shlval(:,:,ipt), pmol, r_only=.true.)
     end do evaluate_basis_functions
     rho(:,:) = 0_ark
-    ibas = 1_ik
-    evaluate_atom_new: do iat = 1,natm
-        ! divide basval into atomic components
-        allocate (ptval(nbas(iat)), admat(nbas(iat),nbas(iat)))
-        admat = dmat(ibas:ibas+nbas(iat)-1,ibas:ibas+nbas(iat)-1,iat)
+    ish = 1
+    evaluate_atom: do iat = 1,natm
+        ! divide shlval into atomic components
+        allocate (ptval(nsh(iat)), admat(nsh(iat), nsh(iat)))
+        admat = dmat(ish:ish+nsh(iat)-1,ish:ish+nsh(iat)-1)
         ! multiply by their respective density matrices
         evaluate_pt_dens: do ipt = 1,npt
-            ptval = basval(1,ibas:ibas+nbas(iat)-1,ipt)
+            ptval = shlval(1,ish:ish+nsh(iat)-1,ipt)
             rho(iat,ipt) = dot_product(ptval, matmul(admat, ptval))
         end do evaluate_pt_dens
         deallocate (ptval, admat)
-        ibas = ibas + nbas(iat)
-    end do evaluate_atom_new
+        ish = ish + nsh(iat)
+    end do evaluate_atom
 
 end subroutine evaluate_atomic
 
 !
 !  Update the set of atomic density matrices based on charges
 !
-subroutine update_densmat(chg, maxc, ql, natm, uind, nu, atmden, dload, nbas, dens)
+subroutine update_densmat(chg, maxc, ql, natm, uind, nu, atmden, dload, nsh, dens)
     integer(ik),intent(in)  :: natm, nu, maxc
-    integer(ik),intent(in)  :: nbas(natm), ql(nu), uind(natm)
+    integer(ik),intent(in)  :: nsh(natm), ql(nu), uind(natm)
     logical,intent(inout)   :: dload(2*maxc+1,nu)
     real(rk),intent(in)     :: chg(natm)
-    real(ark),intent(inout) :: atmden(maxval(nbas),maxval(nbas),2*maxc+1,nu)
-    real(ark),intent(out)   :: dens(sum(nbas),sum(nbas))
+    real(ark),intent(inout) :: atmden(maxval(nsh),maxval(nsh),2*maxc+1,nu)
+    real(ark),intent(out)   :: dens(sum(nsh),sum(nsh))
     !
-    integer(ik)             :: iat, ibas, il, iu, ui
+    integer(ik)             :: iat, ish, il, iu, ui
     real(rk)                :: modc, cthrsh=1e-3
 
-    ibas = 1_ik
+    ish = 1
     update_dmat: do iat = 1,natm
         if (abs(chg(iat)) > maxc) then
             write(ofile,'("update_densmat: abs(charge) greater than MAXCHG = ",i3)') maxc
@@ -447,52 +448,52 @@ subroutine update_densmat(chg, maxc, ql, natm, uind, nu, atmden, dload, nbas, de
             il = maxc + 1 + nint(chg(iat))
             if (.not. dload(il,ui)) then
                 ! import the integer density matrix
-                call load_atom_dmat(ql(ui), nint(chg(iat)), maxval(nbas), atmden(:,:,il,ui))
+                call load_atom_dmat(ql(ui), nint(chg(iat)), nsh(iat), atmden(:nsh(iat),:nsh(iat),il,ui))
                 dload(il,ui) = .true.
             end if
-            dens(ibas:ibas+nbas(iat)-1,ibas:ibas+nbas(iat)-1) = atmden(:,:,il,ui)
+            dens(ish:ish+nsh(iat)-1,ish:ish+nsh(iat)-1) = atmden(:nsh(iat),:nsh(iat),il,ui)
         else
             ! real charge, get ceil(chg) and floor(chg) contributions
             il = maxc + 1 + floor(chg(iat))
             iu = maxc + 1 + ceiling(chg(iat))
             if (.not. dload(il,ui)) then
                 ! import the lower integer density matrix
-                call load_atom_dmat(ql(ui), floor(chg(iat)), maxval(nbas), atmden(:,:,il,ui))
+                call load_atom_dmat(ql(ui), floor(chg(iat)), nsh(iat), atmden(:nsh(iat),:nsh(iat),il,ui))
                 dload(il,ui) = .true.
             end if
             if (.not. dload(iu,ui)) then
                 ! import the upper integer density matrix
-                call load_atom_dmat(ql(ui), ceiling(chg(iat)), maxval(nbas), atmden(:,:,iu,ui))
+                call load_atom_dmat(ql(ui), ceiling(chg(iat)), nsh(iat), atmden(:nsh(iat),:nsh(iat),iu,ui))
                 dload(iu,ui) = .true.
             end if
-            dens(ibas:ibas+nbas(iat)-1,ibas:ibas+nbas(iat)-1) = (1-modc)*atmden(:,:,il,ui) + modc*atmden(:,:,iu,ui)
+            dens(ish:ish+nsh(iat)-1,ish:ish+nsh(iat)-1) = (1-modc)*atmden(:nsh(iat),:nsh(iat),il,ui) + modc*atmden(:nsh(iat),:nsh(iat),iu,ui)
         end if
-        ibas = ibas + nbas(iat)
+        ish = ish + nsh(iat)
     end do update_dmat
 
 end subroutine update_densmat
 
 !
-!  Load the density of an atom/basis/charge combination
+!  Load the radial density matrix of an atom/basis/charge combination
 !
-subroutine load_atom_dmat(q, chg, maxbas, admat)
-    integer(ik),intent(in) :: q, chg, maxbas
-    real(ark),intent(out)  :: admat(maxbas,maxbas)
+subroutine load_atom_dmat(q, chg, nsh, admat)
+    integer(ik),intent(in) :: q, chg, nsh
+    real(ark),intent(out)  :: admat(nsh,nsh)
     !
-    character(20)          :: fbas, sstr
-    character(2)           :: elem, fel
-    integer(ik)            :: i, j, ios, lstr, fch, fnb, ieq, iao, nao
-    integer(ik)            :: row, line, nline, ifield
-    integer(ik)            :: chk_row, chk_line, loc_int(5), neq(maxbas)
+    character(20)          :: sstr
+    character(2)           :: elem
+    integer(ik)            :: ios, ieq
+    integer(ik)            :: row, line, ifield
+    integer(ik)            :: chk_row, chk_line
     logical                :: file_exists, have_dmat
-    real(ark)              :: offd(maxbas), adtmp(maxbas,maxbas), loc_val(5)
-    real(ark),allocatable  :: omat(:,:)
+    real(ark)              :: loc_val(5)
 
     if (chg >= q) then
         admat = 0_ark
         return
     end if
     inquire(file=trim(inp%lib_path), exist=file_exists)
+    ! open the radial density matrix library
     if (.not. file_exists) then
         write(ofile,'("load_atom_dmat: Density matrix library not found at ",a)') inp%lib_path
         stop "load_atom_dmat - density matrix file does not exist"
@@ -500,54 +501,22 @@ subroutine load_atom_dmat(q, chg, maxbas, admat)
     write(ofile,'("Loading ab initio atomic density for Z = ",i3,", CHG = ",i3)') q, chg
     open (gam_file,file=trim(inp%lib_path),action='read',position='rewind',status='old',iostat=ios)
     elem = AtomElementSymbol(1._rk*q)
-    ! find the density matrix of the atom/basis/charge
+    ! find the radial density matrix of the atom/basis/charge
     if (chg > 0.5) then
-        write (sstr,"(a2,' ',a,' ',sp,i3)") adjustl(elem), trim(inp%abas), chg
+        write (sstr,"(a2,' ',a8,sp,i3)") adjustl(elem), adjustl(inp%abas), chg
     else
-        write (sstr,"(a2,' ',a,' ',i3)") adjustl(elem), trim(inp%abas), chg
+        write (sstr,"(a2,' ',a8,i3)") adjustl(elem), adjustl(inp%abas), chg
     end if
-    lstr = len(trim(sstr))
     have_dmat = .false.
     scan_dmat: do while (.not.have_dmat)
         call gam_readline
-        if (gam_line_buf(:lstr)==trim(sstr)) have_dmat = .true.
+        if (trim(gam_line_buf)==trim(sstr)) have_dmat = .true.
     end do scan_dmat
     if (.not.have_dmat) then
         write(out,'("load_atom_dmat: Density matrix ",a," not found for atom ",a,"with charge ",sp,i3)') trim(inp%abas), trim(elem), chg
         stop "load_atom_dmat - density matrix not found"
     end if
-    ! read the number of blocks, fnb
-    read (gam_line_buf,*,iostat=ios) fel, fbas, fch, fnb
-    nline = ceiling(fnb / 5._rk)
-    ! read the number of each symmetry block
-    ieq = 1
-    line = 0
-    read_nequiv: do
-      line = line + 1
-      call gam_readline
-      read (gam_line_buf,'(i5,5i15)',iostat=ios) chk_line, loc_int
-      stuff_ne: do ifield = 1,5
-          neq(ieq) = loc_int(ifield)
-          ieq = ieq + 1
-          if (ieq > fnb) exit stuff_ne
-      end do stuff_ne
-      if (line == nline) exit read_nequiv
-    end do read_nequiv
-    ! read the off diagonal elements of symmetry blocks
-    ieq = 1
-    line = 0
-    read_offdiag: do
-      line = line + 1
-      call gam_readline
-      read (gam_line_buf,'(i5,5g15.10)',iostat=ios) chk_line, loc_val
-      stuff_od: do ifield = 1,5
-          offd(ieq) = loc_val(ifield)
-          ieq = ieq + 1
-          if (ieq > fnb) exit stuff_od
-      end do stuff_od
-      if (line == nline) exit read_offdiag
-    end do read_offdiag
-    ! finally, read the density matrix
+    ! read the radial density matrix
     row = 1
     ieq = 1
     line = 0
@@ -562,9 +531,9 @@ subroutine load_atom_dmat(q, chg, maxbas, admat)
       stuff_d: do ifield = 1,5
           admat(ieq,row) = loc_val(ifield)
           ieq = ieq + 1
-          if (ieq > fnb) then
+          if (ieq > nsh) then
               row = row + 1
-              if (row > fnb) exit read_dmat
+              if (row > nsh) exit read_dmat
               line = 0
               ieq = 1
               exit stuff_d
@@ -572,30 +541,6 @@ subroutine load_atom_dmat(q, chg, maxbas, admat)
       end do stuff_d
     end do read_dmat
     close (gam_file,iostat=ios)
-    ! construct the full density matrix
-    nao = sum(neq(:fnb))
-    allocate (omat(nao,nao))
-    iao = 1
-    omat = 0_ark
-    build_tmp: do ieq = 1,fnb
-        do i = 0,neq(ieq)-1
-            adtmp(iao+i,:fnb) = admat(ieq,:fnb) / neq(ieq)
-            do j = 0,i-1
-                omat(iao+i,iao+j) = (offd(ieq) - admat(ieq,ieq)) / neq(ieq)
-                omat(iao+j,iao+i) = omat(iao+i,iao+j)
-            end do
-        end do
-        iao = iao + neq(ieq)
-    end do build_tmp
-    iao = 1
-    build_final: do ieq = 1,fnb
-        do i = 0,neq(ieq)-1
-            admat(:nao,iao+i) = adtmp(:nao,ieq) / neq(ieq)
-        end do
-        admat(iao:iao+neq(ieq)-1,iao:iao+neq(ieq)-1) = neq(ieq)*admat(iao:iao+neq(ieq)-1,iao:iao+neq(ieq)-1)
-        iao = iao + neq(ieq)
-    end do build_final
-    admat(:nao,:nao) = admat(:nao,:nao) + omat
 
 end subroutine load_atom_dmat
 

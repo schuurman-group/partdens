@@ -552,20 +552,23 @@
     !
     !  Evaluate basis functions and their gradients on grid
     !
-    subroutine gamess_evaluate_functions(xyz,basval,structure,rot)
+    subroutine gamess_evaluate_functions(xyz,basval,structure,rot,r_only)
       real(rk), intent(in)                :: xyz(:)      ! Coordinates of the point, at which AOs must be evaluated.
-      real(rk), intent(out)              :: basval(:,:) ! Basis functions and gradients at a grid point. The first
+      real(rk), intent(out)               :: basval(:,:) ! Basis functions and gradients at a grid point. The first
                                                          ! index is (function,d/dx,d/dy,d/dz) or just (function)
       type(gam_structure), intent(inout), target, optional &
                                           :: structure   ! Context to use
-      real(rk), intent(in), optional     :: rot(:,:)    ! Rotation matrix to apply to the structure. It is
+      real(rk), intent(in), optional     :: rot(:,:)     ! Rotation matrix to apply to the structure. It is
                                                          ! perfectly OK to use different rotation matrix
                                                          ! in different calls using the same context.
                                                          ! If the rotation matrix is not given, rotation matrix
                                                          ! from the previous call will be used.
+      logical, intent(in), optional       :: r_only      ! Evaluate only the radial component of basis functions
       !
       type(gam_structure), pointer :: gam
       real(xrk)                    :: det_rot
+      logical                      :: eval_rad
+      integer(ik)                  :: iat, valsz
       !
       call TimerStart('GAMESS Evaluate functions')
       !
@@ -573,6 +576,17 @@
         gam => structure
       else
         gam => gam_def
+      end if
+      !
+      eval_rad = .false.
+      if (present(r_only)) eval_rad = r_only
+      if (eval_rad) then
+        valsz = 0
+        do iat = 1,gam%natoms
+          valsz = valsz + gam%atoms(iat)%nshell
+        end do
+      else
+        valsz = gam%nbasis
       end if
       !
       !  Deal with the rotation matrix
@@ -587,7 +601,7 @@
         gam%rotmat_rk = real(gam%rotmat,kind=kind(gam%rotmat_rk))
       end if
       !
-      if (size(xyz)/=3 .or. all(size(basval,dim=1)/=(/1,4/)) .or. size(basval,dim=2)/=gam%nbasis) then
+      if (size(xyz)/=3 .or. all(size(basval,dim=1)/=(/1,4/)) .or. size(basval,dim=2)/=valsz) then
         stop 'import_gamess%gamess_evaluate_functions - Argument array sizes are not valid'
       end if
       !
@@ -599,7 +613,11 @@
       !  After this point, we should not have major surprises accessing out data.
       !
       if (size(basval,dim=1)==1) then
-        call evaluate_basis_functions(gam,xyz,basval(1,:))
+        if (eval_rad) then
+          call evaluate_shell_radial(gam,xyz,basval(1,:))
+        else
+          call evaluate_basis_functions(gam,xyz,basval(1,:))
+        end if
       else
         call evaluate_basis_functions_and_gradients(gam,xyz,basval)
       end if
@@ -2163,6 +2181,54 @@
         stop 'import_gamess%evaluate_basis_functions - count error'
       end if
     end subroutine evaluate_basis_functions
+    !
+    !  Evaluates radial-only values of basis function shells at a grid point.
+    !  This is a modification of evaluate_basis_functions above.
+    !
+    subroutine evaluate_shell_radial(gam,abs_xyz,basval)
+      type(gam_structure), target, intent(in) :: gam        ! Context to use
+      real(rk), intent(in)                    :: abs_xyz(:) ! Coordinates of the point
+      real(rk), intent(out)                   :: basval(:)  ! Values of the basis functions
+      !
+      integer(ik)             :: iat, ish, ish_l
+      integer(ik)             :: ip1, ip2, ip
+      integer(ik)             :: p_sh
+      type(gam_atom), pointer :: at
+      real(rk)                :: r2
+      real(rk)                :: radial, exparg
+      !
+      !  Process all centres containing basis functions
+      !
+      p_sh = 1
+      atom_loop: do iat=1,gam%natoms
+        at => gam%atoms(iat)
+        !
+        !  Calculate square distance
+        !
+        r2 = sum((abs_xyz - at%xyz_rk/abohr)**2)
+        !
+        !  Process all shells on the currently selected centre
+        !
+        shell_loop: do ish=1,at%nshell
+          !
+          !  Calculate contracted radial part
+          !
+          ip1 = at%sh_p(ish)
+          ip2 = at%sh_p(ish+1)-1
+          ish_l = at%sh_l(ish)
+          !
+          radial = 0 ;
+          contract_radial: do ip=ip1,ip2
+            exparg = -at%p_zet_rk(ip)*r2
+            if (exparg<=-max_exp) cycle contract_radial
+            radial = radial + at%p_c_rk(ip)*exp(exparg)
+          end do contract_radial
+          !
+          basval(p_sh) = sqrt(r2**ish_l/(2*ish_l+1))*radial
+          p_sh = p_sh + 1
+        end do shell_loop
+      end do atom_loop
+    end subroutine evaluate_shell_radial
     !
     !  Evaluates values of all basis functions and their gradients at a grid point.
     !  This is a modification of evaluate_basis_functions above.

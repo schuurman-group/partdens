@@ -57,7 +57,7 @@ subroutine read_input(inf, struct)
     struct%max_charge   = 3
     !struct%atom_lib     = "mp2.aug-cc-pVTZ"
     struct%abas         = "APVTZ"
-    struct%lib_path     = "/globalhome/rymac/Projects/PartialCharge/partdens/atomlib/libtest"
+    struct%lib_path     = "/globalhome/rymac/Projects/PartialCharge/partdens/atomlib/scf"
     struct%interp_type  = "exp"
     struct%n_rad_atom   = 70
     struct%interp_ord   = 8

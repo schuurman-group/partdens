@@ -95,10 +95,15 @@ def read_mos(fname, met='scf'):
     return lbl, np.array(vec)
 
 
-def read_occ(fname, met='scf'):
-    """Reads the occupations from a GAMESS data file."""
+def read_out(fname, met='scf'):
+    """Reads the basis and occupations from a GAMESS output file."""
     with open(fname, 'r') as f:
         dat = f.readlines()
+
+    for line in dat:
+        if '$BASIS REQUESTS READING THE' in line:
+            bas = line.split('"')[1].strip()
+            break
 
     if met == 'scf':
         for line in dat:
@@ -122,12 +127,12 @@ def read_occ(fname, met='scf'):
             elif read:
                 occ += [float(line[j:j+15]) for j in range(1, len(line)-1, 15)]
 
-    return occ
+    return bas, occ
 
 
 def build_mats(labels, ang=True):
-    """Returns the angular overlap matrix and the nao->nshell transformation
-    matrix based on a list of shell labels."""
+    """Returns the angular overlap matrix and the number of AOs per
+    shell based on a list of shell labels."""
     nlbl = len(labels)
 
     # find T and powers of x, y, and z
@@ -222,16 +227,16 @@ def dfac(x):
     return xfac2
 
 
-def write_densmat(f, dens, lbl, chg, neq=None, offd=None):
+def write_densmat(f, dens, lbl, bas, chg, neq=None, offd=None):
     """Writes the symmetrized density matrix to an output file."""
     nblk = len(dens)
     nnum = (nblk // 5)*[5] + [nblk % 5]
 
-    # write identity and number of blocks
+    # write atom, basis and charge
     if chg == 0:
-        f.write('{:2s}{:3d}{:4d}\n'.format(lbl, chg, nblk))
+        f.write('{:3s}{:8s}{:3d}\n'.format(lbl, bas, chg))
     else:
-        f.write('{:2s}{:+3d}{:4d}\n'.format(lbl, chg, nblk))
+        f.write('{:3s}{:8s}{:+3d}\n'.format(lbl, bas, chg))
 
     if neq is not None:
         # write number of equivalent blocks
@@ -274,7 +279,7 @@ def main():
     stub = sys.argv[1].replace('.dat', '')
     atm, chg = read_stub(stub)
     l, c = read_mos(stub + '.dat', met=method)
-    n = read_occ(stub + '.out', met=method)
+    basis, n = read_out(stub + '.out', met=method)
     nao = len(c)
 
     # get A and numbers of equivalent AOs
@@ -308,12 +313,13 @@ def main():
     if not np.isclose(np.sum(da), sumdr):
         raise ValueError('Sum of D_r not conserved ' +
                          '({:10.3e},{:10.3e})'.format(np.sum(da), sumdr))
-    if not np.isclose(np.trace(da), np.trace(dr)):
-        raise ValueError('Trace of D_r not conserved ' +
-                         '({:10.3e},{:10.3e})'.format(np.trace(da), np.trace(dr)))
+    if not integ_ang:
+        if not np.isclose(np.trace(da), np.trace(dr)):
+            raise ValueError('Trace of D_r not conserved ' +
+                             '({:10.3e},{:10.3e})'.format(np.trace(da), np.trace(dr)))
 
     # output D_r
-    write_densmat(sys.stdout, dr, atm, chg, neq=neqiv, offd=od)
+    write_densmat(sys.stdout, dr, atm, basis, chg, neq=neqiv, offd=od)
 
 
 if __name__ == '__main__':
