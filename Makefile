@@ -1,7 +1,6 @@
 goal: makefile.dep
 	make bader.x
 	make gridchg.x
-	make sphatom.x
 	make nci.x
 	make nat_ibo.x
 	make newton.x
@@ -36,7 +35,7 @@ dgedi.o:	dgedi.f
 	$(CC) -c $<
 
 clean:
-	-/bin/rm -f *.{o,mod,x,il,a} *__genmod.f90 checkpoint_{field,main}.* makefile.dep
+	-/bin/rm -f *.{o,mod,x,il,a} *__genmod.f90 makefile.dep
 
 makefile.dep: $(shell echo *.f90)
 	./make-depend.sh $^ > $@
@@ -44,21 +43,21 @@ makefile.dep: $(shell echo *.f90)
 #
 # Explicit dependencies
 #
-LIBFC += lapack.o
-LIBFC += math.o
-LIBFC += timer.o
-LIBFC += dgefa.o
-LIBFC += dgedi.o
-LIBFC += gamess_internal.o
-LIBFC += import_gamess.o
-LIBFC += os_integral_operators.o
 LIBFC += accuracy.o
 LIBFC += atoms.o
-LIBFC += lebedev.o
-LIBFC += molecular_grid.o
-LIBFC += atomdens.o
+LIBFC += dgefa.o
+LIBFC += dgedi.o
 LIBFC += fileio.o
+LIBFC += gamess_internal.o
+LIBFC += import_gamess.o
+LIBFC += lapack.o
+LIBFC += lebedev.o
+LIBFC += math.o
 LIBFC += molden.o
+LIBFC += molecular_grid.o
+LIBFC += os_integral_operators.o
+LIBFC += timer.o
+LIBFC += utilities.o
 
 #
 # Building the binaries
@@ -68,9 +67,6 @@ bader.x: bader.o $(LIBFC)
 
 gridchg.x: gridchg.o $(LIBFC)
 	$(F90) -o gridchg.x gridchg.o $(LIBFC) $(LIBS)
-
-sphatom.x: sphatom.o $(LIBFC)
-	$(F90) -o sphatom.x sphatom.o $(LIBFC) $(LIBS)
 
 nci.x: nci.o $(LIBFC)
 	$(F90) -o nci.x nci.o $(LIBFC) $(LIBS)

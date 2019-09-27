@@ -9,26 +9,26 @@ program newton
     use import_gamess
     use gamess_internal
     use molecular_grid
+    use utilities
     use atoms
-    use atomdens
     use lapack
     use fileio
     !
     character(20)            :: pname
     character(2),allocatable :: atypes(:)
-    logical,allocatable      :: aload(:,:)
+    logical,allocatable      :: dload(:,:)
     integer(ik)              :: ofile, mfile, pfile, qfile
-    integer(ik)              :: i, ib, ipt, iter, npts, iat, jat
-    integer(ik)              :: nat_count, natom, nbatch, nuniq, norb
-    integer(ik),allocatable  :: iwhr(:), qlist(:)
+    integer(ik)              :: i, ib, ipt, is1, is2, iter, npts, iat, jat
+    integer(ik)              :: nat_count, natom, nbatch, nuniq
+    integer(ik),allocatable  :: iwhr(:), qlist(:), npshell(:)
     real(rk)                 :: norm, normatm, ddsq, qtot, tmp_nat_occ(1000)
     real(rk),pointer         :: xyzw(:,:), xyz(:,:)
-    real(rk),allocatable     :: xyzq(:,:), ax(:,:), aw(:,:)
+    real(rk),allocatable     :: xyzq(:,:)
     real(rk),allocatable     :: charge(:), dcharge(:)
-    real(ark),allocatable    :: aden(:,:), agrad(:,:), acden(:,:,:)
+    real(ark),allocatable    :: aden(:,:,:,:), pdens(:,:), pgrad(:,:)
     real(ark),allocatable    :: rhomol(:), rhopro(:), rhoatm(:,:), rhoagrad(:,:)
     real(ark),allocatable    :: hess(:,:), rho2rhs(:,:), nat_occ(:)
-    type(gam_structure)      :: mol
+    type(gam_structure)      :: mol, promol
     type(mol_grid)           :: den_grid
     type(input_data)         :: inp
 
@@ -65,7 +65,7 @@ program newton
     call gamess_load_orbitals(file=trim(inp%orb_fname), structure=mol)
 
     allocate (atypes(mol%natoms), xyzq(4,mol%natoms), iwhr(mol%natoms))
-    allocate (charge(mol%natoms), dcharge(mol%natoms))
+    allocate (charge(mol%natoms), dcharge(mol%natoms), npshell(mol%natoms))
 
     call gamess_report_nuclei(natom, xyzq, mol)
     write(ofile,'("Molecular geometry (in bohr):")')
@@ -74,6 +74,14 @@ program newton
         write(ofile,'("    ",a2,3f14.8)') atypes(iat), xyzq(1:3,iat)
     enddo
     write(ofile,'("")')
+    !
+    !  Import the promolecular basis
+    !
+    promol = mol
+    call gamess_reload_basis(file=inp%extbas, basname=inp%atom_bas, structure=promol)
+    do i = 1,promol%natoms
+        npshell(i) = promol%atoms(i)%nshell
+    end do
     !
     !  Set up the grid
     !
@@ -129,22 +137,21 @@ program newton
     write(ofile,'("Calculating radial atomic grid")')
     write(ofile,'("")')
     call unique(int(xyzq(4,:)), natom, iwhr, nuniq)
-    allocate (qlist(nuniq), ax(nuniq,inp%n_rad_atom), aw(nuniq,inp%n_rad_atom))
-    allocate (aload(2*inp%max_charge+1,nuniq), acden(2*inp%max_charge+1,nuniq,inp%n_rad_atom), aden(natom,inp%n_rad_atom))
-    allocate (agrad(natom,inp%n_rad_atom), hess(natom+1,natom+1), rho2rhs(natom+1,1))
+    allocate (qlist(nuniq), pdens(sum(npshell),sum(npshell)))
+    allocate (dload(2*inp%max_charge+1,nuniq))
+    allocate (aden(maxval(npshell),maxval(npshell),2*inp%max_charge+1,nuniq))
+    allocate (pgrad(sum(npshell),sum(npshell)))
+    allocate (hess(natom+1,natom+1), rho2rhs(natom+1,1))
     qlist = unique_list(int(xyzq(4,:)), natom, iwhr, nuniq)
-    setup_rad: do i = 1,nuniq
-        call rlegendre(inp%n_rad_atom, qlist(i), ax(i,:), aw(i,:))
-    end do setup_rad
 
     !
     !  Atomic density numerical integration loop
     !
-    charge = 0_rk
-    aload(:,:) = .false.
     write(ofile,'("Starting atomic density evaluation")')
     write(ofile,'("")')
     open(mfile, file='moldens', form='unformatted', action='read')
+    charge = 0_rk
+    dload(:,:) = .false.
     iterate_chg: do iter = 1,inp%max_iter
         if (inp%atom_type == "pro") write(ofile,'("ITER = "i4)') iter
         if (iter < 10) then
@@ -160,15 +167,18 @@ program newton
         !
         !  Update the radial atomic densities
         !
-        call update_atoms(charge, inp%max_charge, qlist, natom, iwhr, nuniq, inp%n_rad_atom, inp%atom_lib, inp%atom_type, aload, ax, aw, acden, aden)
-        update_agrad: do iat = 1,natom
+        call update_densmat(charge, inp%max_charge, qlist, natom, iwhr, nuniq, aden, dload, npshell, inp%lib_dmat, inp%atom_bas, pdens)
+        is1 = 1
+        update_pgrad: do iat = 1,natom
             if (abs(charge(iat) - floor(charge(iat))) < 1e-6) then
                 i = inp%max_charge + 1 + nint(charge(iat))
             else
                 i = inp%max_charge + 1 + floor(charge(iat))
             end if
-            agrad(iat,:) = acden(i+1,iwhr(iat),:) - acden(i,iwhr(iat),:)
-        end do update_agrad
+            is2 = is1 + npshell(iat) - 1
+            pgrad(is1:is2,is1:is1) = aden(:npshell(iat),:npshell(iat),i+1,iwhr(iat)) - aden(:npshell(iat),:npshell(iat),i,iwhr(iat))
+            is1 = is1 + npshell(iat)
+        end do update_pgrad
         !
         normatm = 0_rk
         ddsq = 0_rk
@@ -177,7 +187,7 @@ program newton
         hess(:natom,natom+1) = 1_ark
         rho2rhs(:natom,1) = 0_ark
         rho2rhs(natom+1,1) = qtot - sum(charge)
-        nullify(xyzw)
+        !nullify(xyzw)
         grid_batches: do ib = 1,nbatch
             !
             !  Get grid points
@@ -192,10 +202,10 @@ program newton
             end if
             if (.not. allocated(rhomol)) allocate (rhomol(npts),rhopro(npts),rhoatm(natom,npts),rhoagrad(natom,npts))
             !
-            !  Evaluate atomic densities at grid points if necessary
+            !  Evaluate atomic densities at grid points
             !
-            call evaluate_atomic(aden, ax, inp%n_rad_atom, xyzq(1:3,:), iwhr, nuniq, natom, inp%interp_type, inp%interp_ord, xyzw(1:3,:), npts, rhoatm)
-            call evaluate_atomic(agrad, ax, inp%n_rad_atom, xyzq(1:3,:), iwhr, nuniq, natom, "pol", 3, xyzw(1:3,:), npts, rhoagrad)
+            call evaluate_atomic(xyzw(1:3,:), npts, promol, pdens, npshell, natom, rhoatm)
+            call evaluate_atomic(xyzw(1:3,:), npts, promol, pgrad, npshell, natom, rhoagrad)
             rhopro = sum(rhoatm, dim=1)
             !
             !  Read in molecular densities
@@ -227,11 +237,6 @@ program newton
                 hess(iat,jat) = hess(jat,iat)
             end do
         end do
-        !print *,size(hess,dim=1),size(hess,dim=2)
-        !print '(5f12.6)',(hess(iat,:), iat=1,natom+1)
-        !print *,size(rho2rhs,dim=1),size(rho2rhs,dim=2)
-        !print '(5f12.6)',rho2rhs
-        !call lapack_dposv(hess, rho2rhs)
         call lapack_dsysv(hess, rho2rhs)
         dcharge = rho2rhs(:natom,1)
         charge = charge + dcharge
@@ -278,224 +283,5 @@ program newton
     write(ofile,'("Exited successfully")')
 
     1000 format(e24.8,f16.8,f16.8,f16.8,e20.10)
-
-contains
-
-!
-!  Find unique elements of a list and return a mask
-!
-subroutine unique(arr, narr, mask, nuniq)
-    integer(ik),intent(in)  :: narr, arr(narr)
-    integer(ik),intent(out) :: nuniq, mask(narr)
-    !
-    integer(ik) :: i, j, ident(100)
-
-    nuniq = 0
-    mask = 0
-    parse_list: do i = 1,narr
-        check_list: do j = 1,nuniq
-            if (arr(i) == ident(j)) then
-                mask(i) = j
-                exit
-            end if
-        end do check_list
-        if (mask(i) == 0) then
-            nuniq = nuniq + 1
-            mask(i) = nuniq
-            ident(nuniq) = arr(i)
-        end if
-    end do parse_list
-end subroutine unique
-
-!
-!  Return a list of unique elements
-!
-function unique_list(arr, narr, mask, nuniq)
-    integer(ik) :: narr, nuniq, arr(narr), mask(narr), unique_list(nuniq)
-    !
-    integer(ik) :: i, j
-
-    do i = 1,nuniq
-        do j = 1,narr
-            if (mask(j) == i) then
-                unique_list(i) = arr(j)
-                exit
-            end if
-        end do
-    end do
-end function unique_list
-
-!
-!  Determine the molecular density at XYZ coordinates
-!
-subroutine evaluate_density(vtyp, nat_count, npt, mol, nat_occ, xyz, rho)
-    character(6),intent(in)   :: vtyp
-    integer(ik),intent(in)    :: nat_count, npt
-    type(gam_structure),intent(inout)   :: mol
-    real(rk),intent(in)       :: nat_occ(nat_count)
-    real(rk),intent(in)       :: xyz(3,npt)
-    real(ark),intent(out)     :: rho(npt)
-    !
-    integer(ik)               :: ipt, ird, imo, nmo, nbas
-    real(ark),allocatable     :: basval(:,:,:)
-    real(rk),allocatable      :: moval(:,:)
-
-    nmo  = mol%nvectors
-    nbas = mol%nbasis
-    !
-    allocate (basval(1,nbas,npt), moval(nmo,npt))
-    !
-    !  First, evaluate basis functions
-    !
-    evaluate_basis_functions: do ipt = 1,npt
-        call gamess_evaluate_functions(xyz(:,ipt), basval(:,:,ipt), mol)
-    end do evaluate_basis_functions
-    !
-    !  Transform AOs to the MOs, for all grid points simultaneously
-    !
-    moval = matmul(transpose(mol%vectors(:,:nmo)), basval(1,:,:))
-    !
-    !  Finally, evaluate the transition density at grid points
-    !
-    rho = 0_ark
-    select case (vtyp)
-        case ("tr1rdm")
-            evaluate_rdm: do ird=1,nat_count
-                imo = 2*ird - 1
-                rho = rho + nat_occ(ird) * moval(imo,:) * moval(imo+1,:)
-            end do evaluate_rdm
-        case ("natorb")
-            evaluate_nat: do ird=1,nat_count
-                rho = rho + nat_occ(ird) * moval(ird,:)**2
-            end do evaluate_nat
-        case default
-            write(out,'("evaluate_density: Unrecognized VEC type ",a8)') vtyp
-            stop "evaluate_density - bad VEC type"
-    end select
-    !
-    deallocate (basval,moval)
-
-end subroutine evaluate_density
-
-!
-!  Determine the atomic densities at grid XYZ coordinates
-!
-subroutine evaluate_atomic(rden, r, nr, xyzc, uind, nu, natm, ityp, iord, xyz, npt, rho)
-    character(3) :: ityp
-    integer(ik)  :: nr, natm, npt, nu, uind(natm), iord
-    real(rk)     :: r(nu,nr), xyzc(3,natm), xyz(3,npt)
-    real(ark)    :: rden(natm,nr), rho(natm,npt)
-    !
-    integer(ik)  :: iat, ipt, ui
-    real(rk)     :: ratm
-
-    rho(:,:) = 0_ark
-    evaluate_atom: do iat = 1,natm
-        ui = uind(iat)
-        interp_point: do ipt = 1,npt
-            ratm = sqrt((xyz(1,ipt)-xyzc(1,iat))**2 + &
-                        (xyz(2,ipt)-xyzc(2,iat))**2 + &
-                        (xyz(3,ipt)-xyzc(3,iat))**2)
-            ! atomic density = 0 outside the grid
-            if (ratm < r(ui,nr)) then
-                rho(iat,ipt) = rho(iat,ipt) + interp(ratm, r(ui,:), rden(iat,:), nr, ityp, iord)
-            end if
-        end do interp_point
-    end do evaluate_atom
-
-end subroutine evaluate_atomic
-
-!
-!  Update the atomic density functions as required
-!
-subroutine update_atoms(chg, maxc, ql, natm, uind, nu, narad, alib, atyp, aload, ax, aw, acden, aden)
-    character(*) :: alib, atyp
-    integer(ik)  :: natm, nu, narad, maxc, ql(nu), uind(natm)
-    logical      :: aload(2*maxc+1,nu)
-    real(rk)     :: chg(natm), ax(nu,narad), aw(nu,narad)
-    real(ark)    :: acden(2*maxc+1,nu,narad), aden(natom,narad)
-    !
-    integer(ik)  :: ia, il, ui
-    real(rk)     :: modc, cthrsh=1e-6
-
-    update_aden: do ia = 1,natm
-        if (abs(chg(ia)) > maxc) then
-            write(ofile,'("update_atoms: abs(charge) greater than MAXCHG = ",i3)') maxc
-            stop "update_atoms - charge out of bounds"
-        end if
-        ui = uind(ia)
-        ! find the modulus (as it should be defined)
-        modc = chg(ia) - floor(chg(ia))
-        if (abs(modc) < cthrsh) then
-            ! integer lower charge
-            il = maxc + 1 + nint(chg(ia))
-        else
-            ! real lower charge
-            il = maxc + 1 + floor(chg(ia))
-        end if
-        if (.not. aload(il,ui)) then
-            ! import the lower integer density
-            call load_atom(ql(ui), il-maxc-1, narad, alib, atyp, ax(ui,:), aw(ui,:), acden(il,ui,:))
-            aload(il,ui) = .true.
-        end if
-        if (.not. aload(il+1,ui)) then
-            ! import the upper integer density
-            call load_atom(ql(ui), il-maxc, narad, alib, atyp, ax(ui,:), aw(ui,:), acden(il+1,ui,:))
-            aload(il+1,ui) = .true.
-        end if
-        aden(ia,:) = (1-modc)*acden(il,ui,:) + modc*acden(il+1,ui,:)
-    end do update_aden
-
-end subroutine update_atoms
-
-!
-!  Load an atomic density
-!
-subroutine load_atom(q, chg, narad, alib, atyp, ax, aw, aden)
-    character(*) :: alib, atyp
-    integer(ik)  :: narad, q, chg
-    real(rk)     :: ax(narad), aw(narad)
-    real(ark)    :: aden(narad)
-    !
-    character(2) :: elem, fel
-    integer(ik)  :: ipt, fch, fnr, ios, afile=111, niter=50
-    real(rk)     :: thrsh=1e-6, junk
-    logical      :: file_exists
-
-    if (chg >= q) then
-        aden = 0_ark
-        return
-    end if
-    select case (atyp)
-        case ("slater")
-            write(ofile,'("Loading Slater atomic density for Z = ",i3,", CHG = ",i3)') q, chg
-            norb = get_norb(q-chg)
-            call psisq(ax, aw, narad, q, chg, norb, niter, thrsh, aden)
-        case default
-            inquire(file=trim(inp%lib_path)//alib, exist=file_exists)
-            if (.not. file_exists) then
-                write(ofile,'("load_atom: Error unrecognized type",a10)') atyp
-                stop "load_atom - unrecognized type"
-            end if
-            write(ofile,'("Loading ab initio atomic density for Z = ",i3,", CHG = ",i3)') q, chg
-            open(afile, file=trim(inp%lib_path)//alib)
-            elem = AtomElementSymbol(1._rk*q)
-            read_file: do
-                read(afile, *, iostat=ios) fel, fch, fnr
-                if (ios /= 0) then
-                    write(ofile,'("load_atom: ab initio density for ",a3,i3,i4," not found")') elem, chg, narad
-                    stop "load_atom - ab initio density not found"
-                end if
-                if ((trim(fel) == trim(elem)) .and. (fch == chg) .and. (fnr == narad)) then
-                    do ipt = 1,narad
-                        read(afile,*) junk, aden(ipt)
-                    end do
-                    exit read_file
-                end if
-            end do read_file
-            close(afile)
-    end select
-
-end subroutine load_atom
 
 end program newton

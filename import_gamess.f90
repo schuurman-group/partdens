@@ -44,6 +44,10 @@
 !
 !  Apr 23, 2014 (SP): Added support for (most) integrals in quadruple precision.
 !
+!  Sept 27, 2019 (RJM): Added reloading an atomic basis for gam_structure from an external
+!                       basis file, and support for evalulating the radial-only component
+!                       of basis functions.
+!
 !  In order to remain compatible with historical usage in multigrid, we
 !  maintain a default structure context; all calls which do not specify
 !  (one of the) context(s) default to that one.
@@ -619,7 +623,11 @@
           call evaluate_basis_functions(gam,xyz,basval(1,:))
         end if
       else
-        call evaluate_basis_functions_and_gradients(gam,xyz,basval)
+        if (eval_rad) then
+          call evaluate_shell_radial_and_gradients(gam,xyz,basval)
+        else
+          call evaluate_basis_functions_and_gradients(gam,xyz,basval)
+        end if
       end if
       call TimerStop('GAMESS Evaluate functions')
       !
@@ -1185,10 +1193,6 @@
       type(gam_atom), intent(out) :: atom
       !
       integer(ik)       :: ios
-      character(len=20) :: lcode
-      integer(ik)       :: idum
-      integer(ik)       :: nprim, ip, pprim, sh, pl, pu, ip1, ip2
-      real(xrk)         :: norm
       !
       !  Coordinates line
       !
@@ -1204,101 +1208,8 @@
       atom%ecp_name   = 'NONE'
       atom%ecp_zcore  = 0._xrk
       atom%ecp_nterms = 0
-      !
-      !  Basis set lines
-      !
-      atom%nshell  = 0 ;
-      atom%sh_p(1) = 1 ;
-      read_shells: do
-        call gam_readline ; call echo(1_ik)
-        if (gam_line_buf==' ') exit read_shells ! End of atom data
-        read (gam_line_buf,*,iostat=ios) lcode, nprim
-        if (ios/=0) then
-          write (out,"('import_gamess%parse_one_atom: Error ',i8,' parsing line:'/1x,a)") ios, trim(gam_line_buf)
-          stop 'import_gamess%parse_one_atom - lcode read'
-        end if
-        !
-        if (nprim>GAM_MAX_CONTRACTION) then
-          write (out,"('import_gamess%parse_one_atom: too many primitives at line ',a)") trim(gam_line_buf)
-          write (out,"('import_gamess%parse_one_atom: increase GAM_MAX_CONTRACTION and recompile')")
-          stop 'import_gamess%parse_one_atom - too many contractions'
-        end if
-        !
-        atom%nshell = atom%nshell + 1
-        if (atom%nshell>=GAM_MAX_SHELLS) then
-          write (out,"('import_gamess%parse_one_atom: too many shells at line ',a)") trim(gam_line_buf)
-          stop 'import_gamess%parse_one_atom - too many shells'
-        end if
-        !
-        select case (lcode)
-          case default
-            write (out,"('import_gamess%parse_one_atom: lcode ',a,' is not recognized')") trim(gam_line_buf)
-            stop 'import_gamess%parse_one_atom - bad lcode'
-          case ('S') ; atom%sh_l(atom%nshell) = 0
-          case ('P') ; atom%sh_l(atom%nshell) = 1
-          case ('D') ; atom%sh_l(atom%nshell) = 2
-          case ('F') ; atom%sh_l(atom%nshell) = 3
-          case ('G') ; atom%sh_l(atom%nshell) = 4
-          case ('H') ; atom%sh_l(atom%nshell) = 5
-          case ('I') ; atom%sh_l(atom%nshell) = 6
-        end select
-        !
-        pprim = atom%sh_p(atom%nshell)
-        read_contractions: do ip=1,nprim
-          call gam_readline ; call echo(1_ik)
-          if (pprim>=GAM_MAX_PRIMITIVE) then
-          write (out,"('import_gamess%parse_one_atom: too many primitives at line ',a)") trim(gam_line_buf)
-            stop 'import_gamess%parse_one_atom - too many primitives'
-          end if
-          read (gam_line_buf,*,iostat=ios) idum, atom%p_zet(pprim),atom%p_c(pprim)
-          if (ios/=0) then
-            write (out,"('import_gamess%parse_one_atom: Error ',i8,' parsing line:'/1x,a)") &
-                   ios, trim(gam_line_buf)
-            stop 'import_gamess%parse_one_atom - primitive read'
-          end if
-          !
-          ! Save a copy of the original contraction coefficients
-          !
-          atom%p_c_orig(pprim)=atom%p_c(pprim)
-          !
-          !  Rescale contraction coefficient to include primitive normalization factor
-          !
-          atom%p_c(pprim) = atom%p_c(pprim) * primitive_norm(atom%sh_l(atom%nshell),atom%p_zet(pprim))
-          ! write (out,*) 'ip = ', ip, ' pprim = ', pprim, ' zeta = ', atom%p_zet(pprim), ' c = ', atom%p_c(pprim)
-          pprim = pprim + 1
-        end do read_contractions
-        !
-        atom%sh_p(atom%nshell+1) = pprim ;
-      end do read_shells
-      !
-      !  Check normalization of each shell, and renormalize if needed.
-      !
-      renormalize: do sh=1,atom%nshell
-        pl   = atom%sh_p(sh)
-        pu   = atom%sh_p(sh+1) - 1
-        norm = 0._xrk
-        left: do ip1=pl,pu
-          right: do ip2=pl,pu
-            norm = norm + atom%p_c(ip1) * atom%p_c(ip2) &
-                    / (atom%p_zet(ip1)+atom%p_zet(ip2))**(1.5_xrk+atom%sh_l(sh))
-          end do right
-        end do left
-        norm = norm * (pi_xrk**1.5_xrk)*gam_normc(atom%sh_l(sh))
-        !
-        if ( (verbose>=0) .and. (abs(norm-1.0_xrk)>1e-6_xrk) ) then
-          write (out,"('import_gamess: Shell ',i4,' lval = ',i2,' with ',i4,' primitives, norm = ',g20.12)") &
-                 sh, atom%sh_l(sh), pu-pl+1, norm
-        end if
-        !
-        !  Renormalize
-        !
-        atom%p_c(pl:pu) = atom%p_c(pl:pu) / sqrt(norm)
-        !
-        !  Make reduced-precision copy
-        !
-        atom%p_c_rk  (pl:pu) = real(atom%p_c  (pl:pu),kind=kind(atom%p_c_rk  ))
-        atom%p_zet_rk(pl:pu) = real(atom%p_zet(pl:pu),kind=kind(atom%p_zet_rk))
-      end do renormalize
+      ! parse the atomic basis
+      call parse_atom_basis(atom)
     end subroutine parse_one_atom
     !
     subroutine parse_ecp_data(gam)
@@ -1427,38 +1338,43 @@
       end if
     end subroutine parse_one_ecp
     !
-    subroutine parse_extbas(atom, basname)
-      type(gam_atom), intent(inout), target  :: atom
-      character(len=*), intent(in)           :: basname
+    subroutine parse_extbas(atom,basname)
+      type(gam_atom), intent(inout) :: atom
+      character(len=*), intent(in)  :: basname
       !
-      integer(ik)       :: ios
-      character(len=20) :: lcode, sstr
-      integer(ik)       :: idum
-      integer(ik)       :: nprim, ip, pprim, sh, pl, pu, ip1, ip2
-      real(ark)         :: norm
+      character(len=20) :: sstr
       logical           :: have_basis
-      type(gam_atom), pointer :: atm
-
-      atm => atom
       !
       !  Find basis set for atom
       !
-      write (sstr,"(a,' ',a)") adjustl(trim(atm%name)), trim(basname)
+      write (sstr,"(a,' ',a)") adjustl(trim(atom%name)), trim(basname)
       write (out,"('import_gamess: Loading external basis ',a)") trim(sstr)
       have_basis = .false.
       scan_lines: do while (.not.have_basis)
         call gam_readline
-        if (gam_line_buf==trim(sstr)) have_basis = .true.
+        if (trim(gam_line_buf)==trim(sstr)) have_basis = .true.
       end do scan_lines
       if (.not.have_basis) then
-        write (out,"('import_gamess%parse_extbas: External basis ',a,' not found for atom ',a)") trim(basname), trim(atm%name)
+        write (out,"('import_gamess%parse_extbas: External basis ',a,' not found for atom ',a)") trim(basname), trim(atom%name)
         stop 'import_gamess%parse_extbas - external basis not found'
       end if
+      ! parse the atomic basis
+      call parse_atom_basis(atom)
+    end subroutine parse_extbas
+    !
+    subroutine parse_atom_basis(atom)
+      type(gam_atom), intent(inout) :: atom
+      !
+      integer(ik)       :: ios
+      character(len=20) :: lcode
+      integer(ik)       :: idum
+      integer(ik)       :: nprim, ip, pprim, sh, pl, pu, ip1, ip2
+      real(xrk)         :: norm
       !
       !  Basis set lines
       !
-      atm%nshell  = 0 ;
-      atm%sh_p(1) = 1 ;
+      atom%nshell  = 0 ;
+      atom%sh_p(1) = 1 ;
       read_shells: do
         call gam_readline ; call echo(1_ik)
         if (gam_line_buf==' ') exit read_shells ! End of atom data
@@ -1474,8 +1390,8 @@
           stop 'import_gamess%parse_extbas - too many contractions'
         end if
         !
-        atm%nshell = atm%nshell + 1
-        if (atm%nshell>=GAM_MAX_SHELLS) then
+        atom%nshell = atom%nshell + 1
+        if (atom%nshell>=GAM_MAX_SHELLS) then
           write (out,"('import_gamess%parse_extbas: too many shells at line ',a)") trim(gam_line_buf)
           stop 'import_gamess%parse_extbas - too many shells'
         end if
@@ -1484,23 +1400,23 @@
           case default
             write (out,"('import_gamess%parse_extbas: lcode ',a,' is not recognized')") trim(gam_line_buf)
             stop 'import_gamess%parse_extbas - bad lcode'
-          case ('S') ; atm%sh_l(atm%nshell) = 0
-          case ('P') ; atm%sh_l(atm%nshell) = 1
-          case ('D') ; atm%sh_l(atm%nshell) = 2
-          case ('F') ; atm%sh_l(atm%nshell) = 3
-          case ('G') ; atm%sh_l(atm%nshell) = 4
-          case ('H') ; atm%sh_l(atm%nshell) = 5
-          case ('I') ; atm%sh_l(atm%nshell) = 6
+          case ('S') ; atom%sh_l(atom%nshell) = 0
+          case ('P') ; atom%sh_l(atom%nshell) = 1
+          case ('D') ; atom%sh_l(atom%nshell) = 2
+          case ('F') ; atom%sh_l(atom%nshell) = 3
+          case ('G') ; atom%sh_l(atom%nshell) = 4
+          case ('H') ; atom%sh_l(atom%nshell) = 5
+          case ('I') ; atom%sh_l(atom%nshell) = 6
         end select
         !
-        pprim = atm%sh_p(atm%nshell)
+        pprim = atom%sh_p(atom%nshell)
         read_contractions: do ip=1,nprim
           call gam_readline ; call echo(1_ik)
           if (pprim>=GAM_MAX_PRIMITIVE) then
           write (out,"('import_gamess%parse_extbas: too many primitives at line ',a)") trim(gam_line_buf)
             stop 'import_gamess%parse_extbas - too many primitives'
           end if
-          read (gam_line_buf,*,iostat=ios) idum, atm%p_zet(pprim),atm%p_c(pprim)
+          read (gam_line_buf,*,iostat=ios) idum, atom%p_zet(pprim), atom%p_c(pprim)
           if (ios/=0) then
             write (out,"('import_gamess%parse_extbas: Error ',i8,' parsing line:'/1x,a)") &
                    ios, trim(gam_line_buf)
@@ -1509,44 +1425,47 @@
           !
           ! Save a copy of the original contraction coefficients
           !
-          atm%p_c_orig(pprim)=atm%p_c(pprim)
+          atom%p_c_orig(pprim)=atom%p_c(pprim)
           !
           !  Rescale contraction coefficient to include primitive normalization factor
           !
-          atm%p_c(pprim) = atm%p_c(pprim) * primitive_norm(atm%sh_l(atm%nshell),atm%p_zet(pprim))
+          atom%p_c(pprim) = atom%p_c(pprim) * primitive_norm(atom%sh_l(atom%nshell),atom%p_zet(pprim))
           ! write (out,*) 'ip = ', ip, ' pprim = ', pprim, ' zeta = ', atom%p_zet(pprim), ' c = ', atom%p_c(pprim)
           pprim = pprim + 1
         end do read_contractions
         !
-        atm%sh_p(atm%nshell+1) = pprim ;
+        atom%sh_p(atom%nshell+1) = pprim ;
       end do read_shells
       !
       !  Check normalization of each shell, and renormalize if needed.
       !
-      renormalize: do sh=1,atm%nshell
-        pl   = atm%sh_p(sh)
-        pu   = atm%sh_p(sh+1) - 1
+      renormalize: do sh=1,atom%nshell
+        pl   = atom%sh_p(sh)
+        pu   = atom%sh_p(sh+1) - 1
         norm = 0._ark
         left: do ip1=pl,pu
           right: do ip2=pl,pu
-            norm = norm + atm%p_c(ip1) * atm%p_c(ip2) &
-                    / (atm%p_zet(ip1)+atm%p_zet(ip2))**(1.5_ark+atm%sh_l(sh))
+            norm = norm + atom%p_c(ip1) * atom%p_c(ip2) &
+                    / (atom%p_zet(ip1)+atom%p_zet(ip2))**(1.5_ark+atom%sh_l(sh))
           end do right
         end do left
-        norm = norm * (pi**1.5_ark)*gam_normc(atm%sh_l(sh))
+        norm = norm * (pi**1.5_ark)*gam_normc(atom%sh_l(sh))
         !
         if ( (verbose>=0) .and. (abs(norm-1.0_ark)>1e-6_ark) ) then
           write (out,"('import_gamess: Shell ',i4,' lval = ',i2,' with ',i4,' primitives, norm = ',g20.12)") &
-                 sh, atm%sh_l(sh), pu-pl+1, norm
+                 sh, atom%sh_l(sh), pu-pl+1, norm
         end if
         !
         !  Renormalize
         !
-        atm%p_c(pl:pu) = atm%p_c(pl:pu) / sqrt(norm)
-        atm%p_c_rk(pl:pu) = atm%p_c(pl:pu)
-        atm%p_zet_rk(pl:pu) = atm%p_zet(pl:pu)
+        atom%p_c(pl:pu) = atom%p_c(pl:pu) / sqrt(norm)
+        !
+        !  Make reduced-precision copy
+        !
+        atom%p_c_rk  (pl:pu) = real(atom%p_c  (pl:pu),kind=kind(atom%p_c_rk  ))
+        atom%p_zet_rk(pl:pu) = real(atom%p_zet(pl:pu),kind=kind(atom%p_zet_rk))
       end do renormalize
-    end subroutine parse_extbas
+    end subroutine parse_atom_basis
     !
     subroutine parse_orbital_data(gam,max_mos_)
       type(gam_structure), intent(inout) :: gam
@@ -2190,17 +2109,22 @@
     !  Evaluates radial-only values of basis function shells at a grid point.
     !  This is a modification of evaluate_basis_functions above.
     !
-    subroutine evaluate_shell_radial(gam,abs_xyz,basval)
+    subroutine evaluate_shell_radial(gam,abs_xyz,shlval)
       type(gam_structure), target, intent(in) :: gam        ! Context to use
       real(rk), intent(in)                    :: abs_xyz(:) ! Coordinates of the point
-      real(rk), intent(out)                   :: basval(:)  ! Values of the basis functions
+      real(rk), intent(out)                   :: shlval(:)  ! Values of the basis function shells
       !
       integer(ik)             :: iat, ish, ish_l
       integer(ik)             :: ip1, ip2, ip
       integer(ik)             :: p_sh
       type(gam_atom), pointer :: at
+      real(rk)                :: rot_xyz(3)
       real(rk)                :: r2
       real(rk)                :: radial, exparg
+      !
+      !  Rotate grid position into molecular frame
+      !
+      rot_xyz = matmul(transpose(gam%rotmat_rk),abs_xyz)
       !
       !  Process all centres containing basis functions
       !
@@ -2210,7 +2134,7 @@
         !
         !  Calculate square distance
         !
-        r2 = sum((abs_xyz - at%xyz_rk/abohr)**2)
+        r2 = sum((rot_xyz - at%xyz_rk/abohr)**2)
         !
         !  Process all shells on the currently selected centre
         !
@@ -2229,7 +2153,7 @@
             radial = radial + at%p_c_rk(ip)*exp(exparg)
           end do contract_radial
           !
-          basval(p_sh) = sqrt(r2**ish_l/(2*ish_l+1))*radial
+          shlval(p_sh) = sqrt(r2**ish_l/(2*ish_l+1))*radial
           p_sh = p_sh + 1
         end do shell_loop
       end do atom_loop
@@ -2341,6 +2265,66 @@
         stop 'import_gamess%evaluate_basis_functions_and_gradients - count error'
       end if
     end subroutine evaluate_basis_functions_and_gradients
+    !
+    !  Evaluates radial-only values of basis function shells and their gradients at a grid point.
+    !  This is a modification of evaluate_shell_radial above.
+    !
+    subroutine evaluate_shell_radial_and_gradients(gam,abs_xyz,shlval)
+      type(gam_structure), target, intent(in) :: gam          ! Context to use
+      real(rk), intent(in)                    :: abs_xyz(:)   ! Coordinates of the point
+      real(rk), intent(out)                   :: shlval(:,:)  ! First index:
+                                                              ! 1 = Values of the basis function shells
+                                                              ! 2 = X gradient of the basis function shells, etc
+      !
+      integer(ik)             :: iat, ish, ish_l
+      integer(ik)             :: ip1, ip2, ip
+      integer(ik)             :: p_sh
+      type(gam_atom), pointer :: at
+      real(rk)                :: rot_xyz(3)
+      real(rk)                :: ur(3), r2
+      real(rk)                :: radial, radial2, exparg
+      !
+      !  Rotate grid position into molecular frame
+      !
+      rot_xyz = matmul(transpose(gam%rotmat_rk),abs_xyz)
+      !
+      !  Process all centres containing basis functions
+      !
+      p_sh = 1
+      atom_loop: do iat=1,gam%natoms
+        at => gam%atoms(iat)
+        !
+        !  Calculate square distance and unit vector along r
+        !
+        ur = rot_xyz - at%xyz_rk/abohr
+        r2 = sum(ur**2)
+        ur = ur / sqrt(r2)
+        !
+        !  Process all shells on the currently selected centre
+        !
+        shell_loop: do ish=1,at%nshell
+          !
+          !  Calculate contracted radial part
+          !
+          ip1 = at%sh_p(ish)
+          ip2 = at%sh_p(ish+1)-1
+          ish_l = at%sh_l(ish)
+          !
+          radial = 0 ; radial2 = 0
+          contract_radial: do ip=ip1,ip2
+            exparg = -at%p_zet_rk(ip)*r2
+            if (exparg<=-max_exp) cycle contract_radial
+            exparg = at%p_c_rk(ip)*exp(exparg)
+            radial = radial + exparg
+            radial2 = radial2 + exparg * (ish_l/r2 - 2*at%p_zet_rk(ip))
+          end do contract_radial
+          !
+          shlval(1,p_sh) = sqrt(r2**ish_l/(2*ish_l+1))*radial
+          shlval(2:4,p_sh) = sqrt(r2**(ish_l+1)/(2*ish_l+1))*radial2*ur
+          p_sh = p_sh + 1
+        end do shell_loop
+      end do atom_loop
+    end subroutine evaluate_shell_radial_and_gradients
     !
     !  A very simple Obara-Saika integral package (real operators)
     !
