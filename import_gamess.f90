@@ -1427,9 +1427,9 @@
       end if
     end subroutine parse_one_ecp
     !
-    subroutine parse_extbas(atom,basname)
-      type(gam_atom), intent(out)  :: atom
-      character(len=*), intent(in) :: basname
+    subroutine parse_extbas(atom, basname)
+      type(gam_atom), intent(inout), target  :: atom
+      character(len=*), intent(in)           :: basname
       !
       integer(ik)       :: ios
       character(len=20) :: lcode, sstr
@@ -1437,10 +1437,13 @@
       integer(ik)       :: nprim, ip, pprim, sh, pl, pu, ip1, ip2
       real(ark)         :: norm
       logical           :: have_basis
+      type(gam_atom), pointer :: atm
+
+      atm => atom
       !
       !  Find basis set for atom
       !
-      write (sstr,"(a,' ',a)") adjustl(trim(atom%name)), trim(basname)
+      write (sstr,"(a,' ',a)") adjustl(trim(atm%name)), trim(basname)
       write (out,"('import_gamess: Loading external basis ',a)") trim(sstr)
       have_basis = .false.
       scan_lines: do while (.not.have_basis)
@@ -1448,14 +1451,14 @@
         if (gam_line_buf==trim(sstr)) have_basis = .true.
       end do scan_lines
       if (.not.have_basis) then
-        write (out,"('import_gamess%parse_extbas: External basis ',a,' not found for atom ',a)") trim(basname), trim(atom%name)
+        write (out,"('import_gamess%parse_extbas: External basis ',a,' not found for atom ',a)") trim(basname), trim(atm%name)
         stop 'import_gamess%parse_extbas - external basis not found'
       end if
       !
       !  Basis set lines
       !
-      atom%nshell  = 0 ;
-      atom%sh_p(1) = 1 ;
+      atm%nshell  = 0 ;
+      atm%sh_p(1) = 1 ;
       read_shells: do
         call gam_readline ; call echo(1_ik)
         if (gam_line_buf==' ') exit read_shells ! End of atom data
@@ -1471,8 +1474,8 @@
           stop 'import_gamess%parse_extbas - too many contractions'
         end if
         !
-        atom%nshell = atom%nshell + 1
-        if (atom%nshell>=GAM_MAX_SHELLS) then
+        atm%nshell = atm%nshell + 1
+        if (atm%nshell>=GAM_MAX_SHELLS) then
           write (out,"('import_gamess%parse_extbas: too many shells at line ',a)") trim(gam_line_buf)
           stop 'import_gamess%parse_extbas - too many shells'
         end if
@@ -1481,23 +1484,23 @@
           case default
             write (out,"('import_gamess%parse_extbas: lcode ',a,' is not recognized')") trim(gam_line_buf)
             stop 'import_gamess%parse_extbas - bad lcode'
-          case ('S') ; atom%sh_l(atom%nshell) = 0
-          case ('P') ; atom%sh_l(atom%nshell) = 1
-          case ('D') ; atom%sh_l(atom%nshell) = 2
-          case ('F') ; atom%sh_l(atom%nshell) = 3
-          case ('G') ; atom%sh_l(atom%nshell) = 4
-          case ('H') ; atom%sh_l(atom%nshell) = 5
-          case ('I') ; atom%sh_l(atom%nshell) = 6
+          case ('S') ; atm%sh_l(atm%nshell) = 0
+          case ('P') ; atm%sh_l(atm%nshell) = 1
+          case ('D') ; atm%sh_l(atm%nshell) = 2
+          case ('F') ; atm%sh_l(atm%nshell) = 3
+          case ('G') ; atm%sh_l(atm%nshell) = 4
+          case ('H') ; atm%sh_l(atm%nshell) = 5
+          case ('I') ; atm%sh_l(atm%nshell) = 6
         end select
         !
-        pprim = atom%sh_p(atom%nshell)
+        pprim = atm%sh_p(atm%nshell)
         read_contractions: do ip=1,nprim
           call gam_readline ; call echo(1_ik)
           if (pprim>=GAM_MAX_PRIMITIVE) then
           write (out,"('import_gamess%parse_extbas: too many primitives at line ',a)") trim(gam_line_buf)
             stop 'import_gamess%parse_extbas - too many primitives'
           end if
-          read (gam_line_buf,*,iostat=ios) idum, atom%p_zet(pprim),atom%p_c(pprim)
+          read (gam_line_buf,*,iostat=ios) idum, atm%p_zet(pprim),atm%p_c(pprim)
           if (ios/=0) then
             write (out,"('import_gamess%parse_extbas: Error ',i8,' parsing line:'/1x,a)") &
                    ios, trim(gam_line_buf)
@@ -1506,40 +1509,42 @@
           !
           ! Save a copy of the original contraction coefficients
           !
-          atom%p_c_orig(pprim)=atom%p_c(pprim)
+          atm%p_c_orig(pprim)=atm%p_c(pprim)
           !
           !  Rescale contraction coefficient to include primitive normalization factor
           !
-          atom%p_c(pprim) = atom%p_c(pprim) * primitive_norm(atom%sh_l(atom%nshell),atom%p_zet(pprim))
+          atm%p_c(pprim) = atm%p_c(pprim) * primitive_norm(atm%sh_l(atm%nshell),atm%p_zet(pprim))
           ! write (out,*) 'ip = ', ip, ' pprim = ', pprim, ' zeta = ', atom%p_zet(pprim), ' c = ', atom%p_c(pprim)
           pprim = pprim + 1
         end do read_contractions
         !
-        atom%sh_p(atom%nshell+1) = pprim ;
+        atm%sh_p(atm%nshell+1) = pprim ;
       end do read_shells
       !
       !  Check normalization of each shell, and renormalize if needed.
       !
-      renormalize: do sh=1,atom%nshell
-        pl   = atom%sh_p(sh)
-        pu   = atom%sh_p(sh+1) - 1
+      renormalize: do sh=1,atm%nshell
+        pl   = atm%sh_p(sh)
+        pu   = atm%sh_p(sh+1) - 1
         norm = 0._ark
         left: do ip1=pl,pu
           right: do ip2=pl,pu
-            norm = norm + atom%p_c(ip1) * atom%p_c(ip2) &
-                    / (atom%p_zet(ip1)+atom%p_zet(ip2))**(1.5_ark+atom%sh_l(sh))
+            norm = norm + atm%p_c(ip1) * atm%p_c(ip2) &
+                    / (atm%p_zet(ip1)+atm%p_zet(ip2))**(1.5_ark+atm%sh_l(sh))
           end do right
         end do left
-        norm = norm * (pi**1.5_ark)*gam_normc(atom%sh_l(sh))
+        norm = norm * (pi**1.5_ark)*gam_normc(atm%sh_l(sh))
         !
         if ( (verbose>=0) .and. (abs(norm-1.0_ark)>1e-6_ark) ) then
           write (out,"('import_gamess: Shell ',i4,' lval = ',i2,' with ',i4,' primitives, norm = ',g20.12)") &
-                 sh, atom%sh_l(sh), pu-pl+1, norm
+                 sh, atm%sh_l(sh), pu-pl+1, norm
         end if
         !
         !  Renormalize
         !
-        atom%p_c(pl:pu) = atom%p_c(pl:pu) / sqrt(norm)
+        atm%p_c(pl:pu) = atm%p_c(pl:pu) / sqrt(norm)
+        atm%p_c_rk(pl:pu) = atm%p_c(pl:pu)
+        atm%p_zet_rk(pl:pu) = atm%p_zet(pl:pu)
       end do renormalize
     end subroutine parse_extbas
     !
