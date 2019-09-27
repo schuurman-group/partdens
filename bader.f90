@@ -16,8 +16,8 @@ program bader
     use import_gamess
     use gamess_internal
     use molecular_grid
+    use utilities
     use atoms
-    use atomdens
     use fileio
     !
     character(2),allocatable :: atypes(:), gatyp(:)
@@ -295,68 +295,6 @@ function argslow(nsm, l, nl) result(sm)
         end do l_loop
     end do find_smallest
 end function argslow
-
-!
-!  Determine the molecular density and gradients at XYZ coordinates
-!
-subroutine evaluate_density_gradients(vtyp, nat_count, npt, mol, nat_occ, xyz, rho, drho)
-    character(6),intent(in) :: vtyp
-    integer(ik),intent(in)    :: nat_count, npt
-    type(gam_structure),intent(inout)   :: mol
-    real(rk),intent(in)       :: nat_occ(nat_count)
-    real(rk),intent(in)       :: xyz(3,npt)
-    real(ark),intent(out)     :: rho(npt), drho(3,npt)
-    !
-    integer(ik)               :: ipt, ird, imo, ic, nmo, nbas
-    real(ark),allocatable     :: basval(:,:,:)
-    real(rk),allocatable      :: moval(:,:), dmoval(:,:,:)
-
-    nmo  = mol%nvectors
-    nbas = mol%nbasis
-    !
-    allocate (basval(4,nbas,npt), moval(nmo,npt), dmoval(3,nmo,npt))
-    !
-    !  First, evaluate basis functions
-    !
-    evaluate_basis_functions: do ipt = 1,npt
-        call gamess_evaluate_functions(xyz(:,ipt), basval(:,:,ipt), mol)
-    end do evaluate_basis_functions
-    !
-    !  Transform AOs to the MOs, for all grid points simultaneously
-    !
-    moval = matmul(transpose(mol%vectors(:,:nmo)), basval(1,:,:))
-    dmoval(1,:,:) = matmul(transpose(mol%vectors(:,:nmo)), basval(2,:,:))
-    dmoval(2,:,:) = matmul(transpose(mol%vectors(:,:nmo)), basval(3,:,:))
-    dmoval(3,:,:) = matmul(transpose(mol%vectors(:,:nmo)), basval(4,:,:))
-    !
-    !  Finally, evaluate the transition density and gradients at grid points
-    !
-    rho = 0_ark
-    drho = 0_ark
-    select case (vtyp)
-        case ("tr1rdm")
-            evaluate_rdm: do ird=1,nat_count
-                imo = 2*ird - 1
-                rho = rho + nat_occ(ird) * moval(imo,:) * moval(imo+1,:)
-                do ic = 1, 3
-                    drho(ic,:) = drho(ic,:) + nat_occ(ird) * (moval(imo,:) * dmoval(ic,imo+1,:) + moval(imo+1,:) * dmoval(ic,imo,:))
-                end do
-            end do evaluate_rdm
-        case ("natorb")
-            evaluate_nat: do ird=1,nat_count
-                rho = rho + nat_occ(ird) * moval(ird,:)**2
-                do ic = 1, 3
-                    drho(ic,:) = drho(ic,:) + 2 * nat_occ(ird) * moval(ird,:) * dmoval(ic,ird,:)
-                end do
-            end do evaluate_nat
-        case default
-            write(out,'("evaluate_density: Unrecognized VEC type ",a8)') vtyp
-            stop "evaluate_density - bad VEC type"
-    end select
-    !
-    deallocate (basval,moval,dmoval)
-
-end subroutine evaluate_density_gradients
 
 !
 !  Determine the Bader atomic assignments

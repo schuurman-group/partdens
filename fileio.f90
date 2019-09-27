@@ -23,8 +23,9 @@ module fileio
     integer(ik)         :: max_charge    ! the maximum absolute charge for any atom
     ! atomic density parameters
     character(3)        :: atom_type     ! the choice of atomic reference (pop or pro)
-    character(100)      :: atom_lib      ! the choice of atomic densities (slater or method.basis)
-    character(100)      :: lib_path      ! the path to the library files (default: ./atomlib)
+    character(8)        :: atom_bas      ! the atomic basis used for atomic densities
+    character(100)      :: extbas        ! the external basis set library
+    character(100)      :: lib_dmat      ! the path to the radial atomic density matrices
     character(3)        :: interp_type   ! the interpolation for atomic densities (exp or pol)
     integer(ik)         :: n_rad_atom    ! the number of radial points for the atom library
     integer(ik)         :: interp_ord    ! the interpolation order (power)
@@ -54,8 +55,9 @@ subroutine read_input(inf, struct)
     struct%covrad_const = 0.6
     struct%dx           = 0.1
     struct%max_charge   = 3
-    struct%atom_lib     = "mp2.aug-cc-pVTZ"
-    struct%lib_path     = "/globalhome/rymac/Projects/PartialCharge/partdens/atomlib/"
+    struct%atom_bas     = "APVTZ"
+    struct%extbas       = "/globalhome/rymac/Projects/PartialCharge/partdens/atomlib/extbas"
+    struct%lib_dmat     = "/globalhome/rymac/Projects/PartialCharge/partdens/atomlib/mp2.dmat"
     struct%interp_type  = "exp"
     struct%n_rad_atom   = 70
     struct%interp_ord   = 8
@@ -78,8 +80,12 @@ subroutine read_input(inf, struct)
                 struct%grid_type = var
             case ("atom_type")
                 struct%atom_type = var
-            case ("atom_lib")
-                struct%atom_lib = var
+            case ("atom_bas")
+                struct%atom_bas = var
+            case ("extbas")
+                struct%extbas = var
+            case ("lib_dmat")
+                struct%lib_dmat = var
             case ("interp_type")
                 struct%interp_type = var
             case ("weight_type")
@@ -153,8 +159,9 @@ subroutine init_gridchg_output(ouf, struct)
     write(ouf,'("")')
     write(ouf,'("    --------- Atomic density ---------")')
     write(ouf,'("    atom_type      =   ",a15)') trim(struct%atom_type)
-    write(ouf,'("    atom_library   =   ",a15)') trim(struct%atom_lib)
-    write(ouf,'("    lib_path       =   ",a)') trim(struct%lib_path)
+    write(ouf,'("    atom_bas       =   ",a15)') trim(struct%atom_bas)
+    write(ouf,'("    extbas         =   ",a)') trim(struct%extbas)
+    write(ouf,'("    lib_dmat       =   ",a)') trim(struct%lib_dmat)
     write(ouf,'("    n_rad_atom     =   ",i15)') struct%n_rad_atom
     write(ouf,'("    max_iter       =   ",i15)') struct%max_iter
     write(ouf,'("    chg_thresh     =   ",e15.3)') struct%chg_thresh
