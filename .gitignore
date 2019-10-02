@@ -1,4 +1,5 @@
 # Ignore compiled libraries and executables
+__pycache__/
 *.o
 *.mod
 *__genmod.f90

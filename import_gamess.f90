@@ -2281,7 +2281,7 @@
       integer(ik)             :: p_sh
       type(gam_atom), pointer :: at
       real(rk)                :: rot_xyz(3)
-      real(rk)                :: ur(3), r2
+      real(rk)                :: xyz(3), r2
       real(rk)                :: radial, radial2, exparg
       !
       !  Rotate grid position into molecular frame
@@ -2296,9 +2296,8 @@
         !
         !  Calculate square distance and unit vector along r
         !
-        ur = rot_xyz - at%xyz_rk/abohr
-        r2 = sum(ur**2)
-        ur = ur / sqrt(r2)
+        xyz = rot_xyz - at%xyz_rk/abohr
+        r2 = sum(xyz**2)
         !
         !  Process all shells on the currently selected centre
         !
@@ -2320,7 +2319,7 @@
           end do contract_radial
           !
           shlval(1,p_sh) = sqrt(r2**ish_l/(2*ish_l+1))*radial
-          shlval(2:4,p_sh) = sqrt(r2**(ish_l+1)/(2*ish_l+1))*radial2*ur
+          shlval(2:4,p_sh) = sqrt(r2**ish_l/(2*ish_l+1))*radial2*xyz
           p_sh = p_sh + 1
         end do shell_loop
       end do atom_loop

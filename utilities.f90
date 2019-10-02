@@ -220,15 +220,13 @@ subroutine update_densmat(chg, maxc, ql, natm, uind, nu, atmden, dload, nsh, dli
 
     is1 = 1
     update_dmat: do iat = 1,natm
-        if (abs(chg(iat)) > maxc) then
+        if (abs(chg(iat)) > maxc + cthrsh) then
             write(out,'("update_densmat: abs(charge) greater than MAXCHG = ",i3)') maxc
             stop "update_densmat - charge out of bounds"
         end if
         ui = uind(iat)
-        ! find the modulus (as it should be defined)
-        modc = chg(iat) - floor(chg(iat))
         is2 = is1 + nsh(iat) - 1
-        if (abs(modc) < cthrsh) then
+        if (abs(chg(iat)-nint(chg(iat))) < cthrsh) then
             ! integer charge, only get one contribution
             il = maxc + 1 + nint(chg(iat))
             if (.not. dload(il,ui)) then
@@ -238,6 +236,8 @@ subroutine update_densmat(chg, maxc, ql, natm, uind, nu, atmden, dload, nsh, dli
             end if
             dens(is1:is2,is1:is2) = atmden(:nsh(iat),:nsh(iat),il,ui)
         else
+            ! find the modulus (as it should be defined)
+            modc = chg(iat) - floor(chg(iat))
             ! real charge, get ceil(chg) and floor(chg) contributions
             il = maxc + 1 + floor(chg(iat))
             iu = maxc + 1 + ceiling(chg(iat))
@@ -275,9 +275,12 @@ subroutine load_atom_dmat(q, chg, nsh, dlib, abas, admat)
     logical                :: file_exists, have_dmat
     real(ark)              :: loc_val(5)
 
-    if (chg >= q) then
+    if (chg == q) then
         admat = 0_ark
         return
+    else if (chg > q) then
+        write(out,'("load_atom_dmat: Atomic charge greater than nuclear charge")')
+        stop "load_atom_dmat - charge out of bounds"
     end if
     inquire(file=trim(dlib), exist=file_exists)
     ! open the radial density matrix library
