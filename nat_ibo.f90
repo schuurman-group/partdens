@@ -467,17 +467,6 @@ subroutine init_output() !nfile, vtyp, nr, na, fmax, fmin, cnst, dg)
     write(ofile,'("+---------------------------------------------------+")')
     write(ofile,'("")')
     write(ofile,'("")')
-    !write(ofile,'("Input summary:")')
-    !write(ofile,'("    ------- Molecular density --------")')
-    !write(ofile,'("    nat_filename   =   ",a15)') trim(nfile)
-    !write(ofile,'("    vec_type       =   ",a15)') trim(vtyp)
-    !write(ofile,'("    n_r_grid       =   ",i15)') nr
-    !write(ofile,'("    n_ang_grid     =   ",i15)') na
-    !write(ofile,'("")')
-    !write(ofile,'("    covrad_max     =   ",f15.4)') fmax
-    !write(ofile,'("    covrad_min     =   ",f15.4)') fmin
-    !write(ofile,'("    covrad_const   =   ",f15.4)') cnst
-    !write(ofile,'("    dgrid          =   ",f15.4)') dg
 end subroutine init_output
 
 end program ibocalc

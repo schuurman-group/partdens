@@ -320,7 +320,9 @@ def write_densmat(f, dens, lbl, bas, chg):
         The atomic charge.
     """
     nblk = len(dens)
-    nnum = (nblk // 5)*[5] + [nblk % 5]
+    nnum = (nblk // 5)*[5]
+    if nblk % 5 != 0:
+        nnum += [nblk % 5]
 
     # write atom, basis and charge
     if chg == 0:

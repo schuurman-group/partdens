@@ -8,6 +8,7 @@ program ncicalc
     use accuracy
     use import_gamess
     use gamess_internal
+    use utilities
     use atoms
     !
     character(100),parameter :: infile="nci.inp", outfile="nci.out"
@@ -223,73 +224,12 @@ subroutine init_output(rfile, vtyp, nr, na, fmax, fmin, cnst, dg)
     write(ofile,'("    n_r_grid       =   ",i15)') nr
     write(ofile,'("    n_ang_grid     =   ",i15)') na
     write(ofile,'("")')
+    write(ofile,'("    -------------- Grid --------------")')
     write(ofile,'("    covrad_max     =   ",f15.4)') fmax
     write(ofile,'("    covrad_min     =   ",f15.4)') fmin
     write(ofile,'("    covrad_const   =   ",f15.4)') cnst
     write(ofile,'("    dgrid          =   ",f15.4)') dg
 end subroutine init_output
-
-!
-!  Determine the molecular density and gradients at XYZ coordinates
-!
-subroutine evaluate_density_gradients(vtyp, nat_count, npt, mol, nat_occ, xyz, rho, drho)
-    character(100),intent(in) :: vtyp
-    integer(ik),intent(in)    :: nat_count, npt
-    type(gam_structure),intent(inout)   :: mol
-    real(rk),intent(in)       :: nat_occ(nat_count)
-    real(rk),intent(in)       :: xyz(3,npt)
-    real(ark),intent(out)     :: rho(npt), drho(3,npt)
-    !
-    integer(ik)               :: ipt, ird, imo, ic, nmo, nbas
-    real(ark),allocatable     :: basval(:,:,:)
-    real(rk),allocatable      :: moval(:,:), dmoval(:,:,:)
-
-    nmo  = mol%nvectors
-    nbas = mol%nbasis
-    !
-    allocate (basval(4,nbas,npt), moval(nmo,npt), dmoval(3,nmo,npt))
-    !
-    !  First, evaluate basis functions
-    !
-    evaluate_basis_functions: do ipt = 1,npt
-        call gamess_evaluate_functions(xyz(:,ipt), basval(:,:,ipt), mol)
-    end do evaluate_basis_functions
-    !
-    !  Transform AOs to the MOs, for all grid points simultaneously
-    !
-    moval = matmul(transpose(mol%vectors(:,:nmo)), basval(1,:,:))
-    dmoval(1,:,:) = matmul(transpose(mol%vectors(:,:nmo)), basval(2,:,:))
-    dmoval(2,:,:) = matmul(transpose(mol%vectors(:,:nmo)), basval(3,:,:))
-    dmoval(3,:,:) = matmul(transpose(mol%vectors(:,:nmo)), basval(4,:,:))
-    !
-    !  Finally, evaluate the transition density and gradients at grid points
-    !
-    rho = 0_ark
-    drho = 0_ark
-    select case (vtyp)
-        case ("tr1rdm")
-            evaluate_rdm: do ird=1,nat_count
-                imo = 2*ird - 1
-                rho = rho + nat_occ(ird) * moval(imo,:) * moval(imo+1,:)
-                do ic = 1, 3
-                    drho(ic,:) = drho(ic,:) + nat_occ(ird) * (moval(imo,:) * dmoval(ic,imo+1,:) + moval(imo+1,:) * dmoval(ic,imo,:))
-                end do
-            end do evaluate_rdm
-        case ("natorb")
-            evaluate_nat: do ird=1,nat_count
-                rho = rho + nat_occ(ird) * moval(ird,:)**2
-                do ic = 1, 3
-                    drho(ic,:) = drho(ic,:) + 2 * nat_occ(ird) * moval(ird,:) * dmoval(ic,ird,:)
-                end do
-            end do evaluate_nat
-        case default
-            write(out,'("evaluate_density: Unrecognized VEC type ",a8)') vtyp
-            stop "evaluate_density - bad VEC type"
-    end select
-    !
-    deallocate (basval,moval,dmoval)
-
-end subroutine evaluate_density_gradients
 
 !
 !  Generate a cartesian grid batch within a certain radius of atoms

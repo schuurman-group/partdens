@@ -21,7 +21,7 @@ program gridchg
     logical,allocatable      :: dload(:,:)
     integer(ik)              :: ofile, mfile, pfile, qfile, wfile
     integer(ik)              :: i, ib, ipt, iter, npts, iat
-    integer(ik)              :: nat_count, natom, nbatch, nuniq
+    integer(ik)              :: nat_count, natom, ndum, nbatch, nuniq
     integer(ik),allocatable  :: iwhr(:), qlist(:), npshell(:)
     real(rk)                 :: norm, normatm, tmp_nat_occ(1000)
     real(rk),pointer         :: xyzw(:,:), xyz(:,:)
@@ -65,14 +65,17 @@ program gridchg
     !
     call gamess_load_orbitals(file=trim(inp%orb_fname), structure=mol)
 
-    allocate (atypes(mol%natoms), xyzq(4,mol%natoms), iwhr(mol%natoms))
-    allocate (charge(mol%natoms), dcharge(mol%natoms), npshell(mol%natoms))
+    allocate (xyzq(4,mol%natoms), iwhr(mol%natoms), npshell(mol%natoms))
+    allocate (atypes(mol%natoms), charge(mol%natoms), dcharge(mol%natoms))
 
     call gamess_report_nuclei(natom, xyzq, mol)
     write(ofile,'("Molecular geometry (in bohr):")')
+    ndum = 0
     do i = 1,mol%natoms
         atypes(i) = trim(mol%atoms(i)%name)
         write(ofile,'("    ",a2,3f14.8)') atypes(i), xyzq(1:3,i)
+        ! count dummy atoms (assumes they are at first indices)
+        if (atypes(i) == 'X') ndum = ndum + 1
     end do
     write(ofile,'("")')
     !
@@ -88,7 +91,7 @@ program gridchg
     !
     write(ofile,'("Setting up the molecular grid")')
     write(ofile,'("")')
-    call GridInitialize(den_grid, inp%n_rad, inp%n_ang, xyzq(1:3,:), atypes)
+    call GridInitialize(den_grid, inp%n_rad, inp%n_ang, xyzq(1:3,ndum+1:), atypes(ndum+1:))
     call GridPointsBatch(den_grid, 'Batches count', count=nbatch)
     !
     !  Molecular density numerical integration loop
@@ -136,13 +139,13 @@ program gridchg
     !
     !  Import atomic properties
     !
-    write(ofile,'("Calculating radial atomic grid")')
+    write(ofile,'("Calculating radial atomic densities")')
     write(ofile,'("")')
-    call unique(int(xyzq(4,:)), natom, iwhr, nuniq)
+    call unique(int(xyzq(4,:)), mol%natoms, iwhr, nuniq)
     allocate (qlist(nuniq), pdens(sum(npshell),sum(npshell)))
     allocate (dload(2*inp%max_charge+1,nuniq))
     allocate (aden(maxval(npshell),maxval(npshell),2*inp%max_charge+1,nuniq))
-    qlist = unique_list(int(xyzq(4,:)), natom, iwhr, nuniq)
+    qlist = unique_list(int(xyzq(4,:)), mol%natoms, iwhr, nuniq)
 
     !
     !  Atomic density numerical integration loop
@@ -170,9 +173,9 @@ program gridchg
         !
         !  Set up the radial atomic densities (only pro or hirsh?)
         !
-        call update_densmat(charge, inp%max_charge, qlist, natom, iwhr, nuniq, aden, dload, npshell, inp%lib_dmat, inp%atom_bas, pdens)
+        call update_densmat(charge, inp%max_charge, qlist, mol%natoms, iwhr, nuniq, aden, dload, npshell, inp%lib_dmat, inp%atom_bas, pdens)
         call GridPointsBatch(den_grid, 'Reset')
-        iat = den_grid%next_part
+        iat = den_grid%next_part + ndum
         normatm = 0_rk
         dcharge = 0_rk
         !nullify(xyzw)
@@ -192,7 +195,7 @@ program gridchg
             !
             !  Evaluate atomic densities at grid points if necessary
             !
-            call evaluate_atomic(xyzw(1:3,:), npts, promol, pdens, npshell, natom, rhoatm)
+            call evaluate_atomic(xyzw(1:3,:), npts, promol, pdens, npshell, mol%natoms, rhoatm)
             rhopro = sum(rhoatm, dim=1)
             !
             !  Read in molecular densities and determine atomic assignments
@@ -207,7 +210,7 @@ program gridchg
                 read_rho: do ipt = 1,npts
                     read(mfile) rhomol(ipt)
                 end do read_rho
-                awgt = assign_atom(xyzq(1:3,:), natom, xyzw(1:3,:), npts, rhoatm, iat, inp%weight_type)
+                awgt = assign_atom(xyzq(1:3,:), natom, xyzw(1:3,:), npts, ndum, rhoatm, iat, inp%weight_type)
             end if
             !
             !  Find the atomic contributions and output densities
@@ -230,7 +233,7 @@ program gridchg
                 end do integrate_pop
             end if
             ! get iatom for the next shell
-            iat = den_grid%next_part
+            iat = den_grid%next_part + ndum
         end do grid_batches
         close(qfile)
         close(wfile)
@@ -285,9 +288,9 @@ contains
 !
 !  Determine the atomic weight factors on a grid
 !
-function assign_atom(xyzatm, natm, xyz, npt, rho, iatom, wtyp)
+function assign_atom(xyzatm, natm, xyz, npt, ndum, rho, iatom, wtyp)
     character(5) :: wtyp
-    integer(ik)  :: natm, npt, iatom
+    integer(ik)  :: natm, npt, ndum, iatom
     real(rk)     :: xyzatm(3,natm), xyz(3,npt), rho(natm,npt)
     real(rk)     :: assign_atom(natm,npt)
     !
@@ -304,8 +307,8 @@ function assign_atom(xyzatm, natm, xyz, npt, rho, iatom, wtyp)
                 dist = sqrt((xyz(1,ipt)-xyzatm(1,:))**2 + &
                             (xyz(2,ipt)-xyzatm(2,:))**2 + &
                             (xyz(3,ipt)-xyzatm(3,:))**2)
-                imin = 1
-                find_vmin: do iat = 2,natm
+                imin = ndum+1
+                find_vmin: do iat = ndum+2,natm
                     if (dist(iat) < dist(imin)) then
                         imin = iat
                     end if

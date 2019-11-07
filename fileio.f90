@@ -26,9 +26,7 @@ module fileio
     character(8)        :: atom_bas      ! the atomic basis used for atomic densities
     character(100)      :: extbas        ! the external basis set library
     character(100)      :: lib_dmat      ! the path to the radial atomic density matrices
-    character(3)        :: interp_type   ! the interpolation for atomic densities (exp or pol)
     integer(ik)         :: n_rad_atom    ! the number of radial points for the atom library
-    integer(ik)         :: interp_ord    ! the interpolation order (power)
     integer(ik)         :: max_iter      ! the maximum number of iterations for promolecule methods
     real(rk)            :: chg_thresh    ! the threshold for charge convergence of promolecule methods
   end type input_data
@@ -58,9 +56,7 @@ subroutine read_input(inf, struct)
     struct%atom_bas     = "APVTZ"
     struct%extbas       = "/globalhome/rymac/Projects/PartialCharge/partdens/atomlib/extbas"
     struct%lib_dmat     = "/globalhome/rymac/Projects/PartialCharge/partdens/atomlib/mp2.dmat"
-    struct%interp_type  = "exp"
     struct%n_rad_atom   = 70
-    struct%interp_ord   = 8
     struct%max_iter     = 100
     struct%chg_thresh   = 1e-4
 
@@ -86,8 +82,6 @@ subroutine read_input(inf, struct)
                 struct%extbas = var
             case ("lib_dmat")
                 struct%lib_dmat = var
-            case ("interp_type")
-                struct%interp_type = var
             case ("weight_type")
                 struct%weight_type = var
             case ("n_rad")
@@ -96,8 +90,6 @@ subroutine read_input(inf, struct)
                 read(var,*,iostat=ios) struct%n_ang
             case ("n_rad_atom")
                 read(var,*,iostat=ios) struct%n_rad_atom
-            case ("interp_ord")
-                read(var,*,iostat=ios) struct%interp_ord
             case ("max_charge")
                 read(var,*,iostat=ios) struct%max_charge
             case ("max_iter")
@@ -165,8 +157,6 @@ subroutine init_gridchg_output(ouf, struct)
     write(ouf,'("    n_rad_atom     =   ",i15)') struct%n_rad_atom
     write(ouf,'("    max_iter       =   ",i15)') struct%max_iter
     write(ouf,'("    chg_thresh     =   ",e15.3)') struct%chg_thresh
-    write(ouf,'("    interp_type    =   ",a15)') trim(struct%interp_type)
-    write(ouf,'("    interp_ord     =   ",i15)') struct%interp_ord
     write(ouf,'("")')
 
 end subroutine init_gridchg_output
