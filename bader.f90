@@ -1,15 +1,18 @@
 !
 !  The (hopefully temporary) Bader QTAIM charge algorithm
 !
-!  Calculates charges from a GAMESS RDM output file using the Bader
+!  Calculates charges from a GAMESS data file using the Bader
 !  atoms-in-molecules algorithm which requires density gradients. This
-!  can potentially be added to the DDCharge code if there is a good way
+!  can potentially be added to the GridCharge code if there is a good way
 !  to cache unassigned points (i.e. save x, y, z, w and rho and propagate
 !  the assignment until assigned).
 !
 !  For now, QTAIM deformation densities are calculated by gridchg.x after
 !  running bader.x with inp%atom_type = pro. This is done by back-propagating
 !  assignments and saving the results in a binary file.
+!
+!  Rodriguez, J.I.; Kostner, A.M.; Ayers, P.W.; Santos-Valle, A.; Vela, A.;
+!  Merino, G. J. Comput. Chem. 2008, 30, 1082-1092.
 !
 program bader
     use accuracy
@@ -20,18 +23,17 @@ program bader
     use atoms
     use fileio
     !
-    character(2),allocatable :: atypes(:), gatyp(:)
-    logical                  :: first_shell, last, ls
-    logical,allocatable      :: adone(:,:)
+    character(2),allocatable :: atypes(:)
+    logical                  :: ptrust
     integer(ik)              :: ofile, mfile, nfile, pfile
-    integer(ik)              :: i, ib, ipt, npts, nax, iat
+    integer(ik)              :: i, ib, ipt, npts, iat
     integer(ik)              :: nat_count, natom, ndum, nbatch
-    integer(ik),allocatable  :: nnn(:), nmask(:,:), asgn(:,:)
-    real(rk)                 :: norm, tmp_nat_occ(1000)
-    real(rk),pointer         :: xyzw_now(:,:), xyzw_nxt(:,:)
-    real(rk),allocatable     :: xyzq(:,:), xyzg(:,:), pt_dist(:), xyz(:,:,:)
-    real(rk),allocatable     :: wgt_now(:), charge(:)
-    real(ark),allocatable    :: rhomol(:,:), wrho(:,:), drho(:,:,:), nat_occ(:)
+    integer(ik),allocatable  :: asgn(:)
+    real(rk)                 :: norm, tmp_nat_occ(1000), unchg
+    real(rk),pointer         :: xyzw(:,:), xyz(:,:)
+    real(rk),allocatable     :: xyzq(:,:), dist(:,:), ed(:,:), er(:,:), cosa(:)
+    real(rk),allocatable     :: rtrust(:), charge(:)
+    real(ark),allocatable    :: rhomol(:), drho(:,:), nat_occ(:)
     type(gam_structure)      :: mol
     type(mol_grid)           :: den_grid
     type(input_data)         :: inp
@@ -46,8 +48,6 @@ program bader
     open(ofile, file="bader.out")
     call read_input(input, inp)
     call init_gridchg_output(ofile, inp)
-    !call read_input(infile, nat_file, vectyp, nrad, nang, atyp, alib, narad, ityp, iordr, wtyp, maxchg, maxiter, thrsh)
-    !call init_output(nat_file, vectyp, nrad, nang, atyp, alib, narad, ityp, iordr, wtyp, maxchg, maxiter, thrsh)
 
     if (inp%weight_type /= "qtaim") then
         write(out,'("Weight type ",a," not supported by bader.x")') trim(inp%weight_type)
@@ -74,195 +74,173 @@ program bader
     !
     call gamess_load_orbitals(file=trim(inp%orb_fname), structure=mol)
 
-    allocate (atypes(mol%natoms), xyzq(4,mol%natoms), xyzg(3,mol%natoms))
-    allocate (gatyp(mol%natoms), charge(mol%natoms))
+    allocate (atypes(mol%natoms), xyzq(4,mol%natoms))
+    allocate (rtrust(mol%natoms), charge(mol%natoms))
 
     call gamess_report_nuclei(natom, xyzq, mol)
     do i = 1,mol%natoms
         atypes(i) = trim(mol%atoms(i)%name)
     enddo
     write(ofile,'("Molecular geometry (in bohr):")')
+    ndum = 0
     do i = 1,mol%natoms
         write(ofile,'("    ",a2,3f14.8)') atypes(i), xyzq(1:3,i)
+        ! count dummy atoms (assumes they are at first indices)
+        if (xyzq(4,i) < 0.5) ndum = ndum + 1
     end do
     write(ofile,'("")')
     !
     !  Set up the grid
     !
     write(ofile,'("Setting up the molecular grid")')
-    ndum = 0
-    do i = 1,natom
-        if (atypes(i) == "X") then
-            write(ofile,'("Skipping dummy atom at index ",i3)') i
-        else
-            ndum = ndum + 1
-            gatyp(ndum) = atypes(i)
-            xyzg(:,ndum) = xyzq(1:3,i)
-        end if
-    end do
+    if (ndum > 0) write(ofile,'("Removing ",i3," dummy atom(s) from grid")') ndum
     write(ofile,'("")')
-    call GridInitialize(den_grid, inp%n_rad, inp%n_ang, xyzg(:,1:ndum), gatyp(1:ndum))
+    call GridInitialize(den_grid, inp%n_rad, inp%n_ang, xyzq(1:3,ndum+1:), atypes(ndum+1:))
     call GridPointsBatch(den_grid, 'Batches count', count=nbatch)
     open(mfile, file='moldens', form='unformatted', action='write')
     open(pfile, file='dens.mol', action='write')
     !
-    !  Set initial values
-    !
-    nullify(xyzw_now, xyzw_nxt)
-    call GridPointsBatch(den_grid, 'Next batch', xyzw=xyzw_now)
-    npts = size(xyzw_now, dim=2)
-    allocate (rhomol(2,npts), wrho(2,npts), drho(2,3,npts))
-    allocate (nnn(npts), nmask(7,npts), pt_dist(npts), wgt_now(npts))
-    allocate (xyz(2,3,npts), asgn(2,npts), adone(2,npts))
-    !
-    !  Find nearest neighbours
-    !
-    write(ofile,'("Finding nearest neighbours in spherical grid")')
-    write(ofile,'("")')
-    find_nearest: do ipt = 1,npts
-        nax = 0
-        do i = 1, 3
-            if (abs(xyzw_now(i,ipt)) < 1e-10) nax = nax + 1
-        end do
-        if (nax == 2) then
-            ! on-axis points only have 4 nearest neighbours
-            nnn(ipt) = 5
-        else
-            ! all other points have 6 nearest neighbours
-            nnn(ipt) = 7
-        end if
-        pt_dist = sqrt((xyzw_now(1,:) - xyzw_now(1,ipt))**2 + &
-                       (xyzw_now(2,:) - xyzw_now(2,ipt))**2 + &
-                       (xyzw_now(3,:) - xyzw_now(3,ipt))**2)
-        ! get indices of current point and its nearest neighbours
-        nmask(:,ipt) = argslow(nnn(ipt), pt_dist, npts)
-    end do find_nearest
-    !
     !  Molecular density numerical integration loop
     !
     write(ofile,'("Calculating molecular density")')
-    ! get density and gradients for the first shell
-    call evaluate_density_gradients(inp%vec_type, nat_count, npts, mol, nat_occ, xyzw_now(1:3,:), rhomol(2,:), drho(2,:,:))
-    xyz(2,:,:) = xyzw_now(1:3,:)
-    wrho(2,:) = rhomol(2,:) * xyzw_now(4,:)
-    norm = sum(wrho(2,:))
-    charge(:) = xyzq(4,:)
-    asgn(:,:) = 0
-    adone(:,:) = .false.
-    first_shell = .true.
-    last = .false.
-    iat = den_grid%next_part
-    mol_grid_batches: do ib = 1,nbatch-1
-        if (first_shell) then
-            ! get next grid points
-            call GridPointsBatch(den_grid, 'Next batch', xyzw=xyzw_nxt)
-            first_shell = .false.
-            ls = .false.
-        else
-            if (ib == nbatch-1) then
-                ! the next iteration is the last shell
-                last = .true.
-                ls = .true.
-            else
-                ! get next grid points
-                call GridPointsBatch(den_grid, 'Next batch', xyzw=xyzw_nxt)
-                ! check to see if the next shell is a different atom
-                if (iat /= den_grid%next_part) then
-                    ls = .true.
-                else
-                    ls = .false.
-                end if
-            end if
-            !
-            !  Evaluate density and density gradients at grid points
-            !
-            call evaluate_density_gradients(inp%vec_type, nat_count, npts, mol, nat_occ, xyz(2,:,:), rhomol(2,:), drho(2,:,:))
-            !
-            !  Assign the densities for a set of two shells
-            !
-            wrho(2,:) = rhomol(2,:) * wgt_now
-            norm = norm + sum(wrho(2,:))
-            call assign_shell(xyz, wrho, drho, asgn, adone, npts, xyzq, charge, natom, nmask, nnn, ls)
+    nullify(xyzw)
+    norm = 0_rk
+    rtrust = 0_rk
+    iat = 1
+    ptrust = .true.
+    mol_grid_batches: do ib = 1,nbatch
+        !
+        !  Get grid points
+        !
+        call GridPointsBatch(den_grid, 'Next batch', xyzw=xyzw)
+        xyz => xyzw(1:3,:)
+        !
+        !  If the batch size changed, reallocate rho and other values
+        !
+        npts = size(xyzw, dim=2)
+        if (allocated(rhomol)) then
+            if (size(rhomol) /= npts) deallocate (rhomol, drho, dist, ed, er, cosa)
         end if
+        if (.not. allocated(rhomol)) allocate (rhomol(npts), drho(3,npts), dist(3,npts), ed(3,npts), er(3,npts), cosa(npts))
         !
-        !  Prepare the next shell
+        !  Evaluate density and gradients of each grid point
         !
-        if (.not. last) then
-            xyz(1,:,:) = xyz(2,:,:)
-            xyz(2,:,:) = xyzw_nxt(1:3,:)
-            wgt_now(:) = xyzw_nxt(4,:)
-            rhomol(1,:) = rhomol(2,:)
-            wrho(1,:) = wrho(2,:)
-            drho(1,:,:) = drho(2,:,:)
-            asgn(1,:) = asgn(2,:)
-            asgn(2,:) = 0
-            adone(1,:) = adone(2,:)
-            adone(2,:) = .false.
-            iat = den_grid%next_part
-            if (ls) then
-                first_shell = .true.
+        call evaluate_density_gradients(inp%vec_type, nat_count, npts,  mol, nat_occ, xyz, rhomol, drho)
+        !
+        !  Propagate the trust sphere, if appropriate
+        !
+        if (ptrust) then
+            ! get the distance vector to the atom centre
+            do i = 1,3
+                dist(i,:) = xyzq(i,iat)
+            end do
+            dist = dist - xyz
+            ! get unit vectors of distances and gradients
+            do ipt = 1,npts
+                ed(:,ipt) = drho(:,ipt) / sqrt(sum(drho(:,ipt)**2, dim=1))
+                er(:,ipt) = dist(:,ipt) / sqrt(sum(dist(:,ipt)**2, dim=1))
+            end do
+            ! find cos(ed.er)
+            cosa = sum(ed*er, dim=1)
+            ! check for gradients that point away from the centre
+            check_cosa: do ipt = 1,npts
+                if (cosa(ipt) < 0.5_rk*sqrt(2.0_rk)) then
+                    ptrust = .false.
+                    exit check_cosa
+                end if
+            end do check_cosa
+            ! if all pointing to the centre, set rtrust
+            if (ptrust) then
+                rtrust(iat) = sqrt(sum(dist(:,1)**2, dim=1))
             end if
+        end if
+        if (den_grid%next_part + ndum /= iat) then
+            ! start propagating if the atom centre has changed
+            ptrust = .true.
+            iat = den_grid%next_part + ndum
+            rtrust(iat) = 1e-4 ! It seems like I need to do this? Trust sphere too small for H...
         end if
         !
         !  Integrate and save
         !
-        rewind mfile
         mol_integrate: do ipt = 1,npts
-            write(mfile) rhomol(1,ipt), asgn(1,ipt)
-            write(pfile,1000) wgt_now(ipt), xyz(1,:,ipt), rhomol(1,ipt)
+            norm = norm + xyzw(4,ipt) * rhomol(ipt)
+            write(mfile) rhomol(ipt), drho(1,ipt), drho(2,ipt), drho(3,ipt)
+            write(pfile,1000) xyzw(4,ipt), xyzw(1:3,ipt), rhomol(ipt)
         end do mol_integrate
-        call system("cat moldens snedlom > snedlom.tmp")
-        call system("mv snedlom.tmp snedlom")
     end do mol_grid_batches
+    close(mfile)
+    close(pfile)
     write(ofile,'("Total molecular density: ",f14.8)') norm
+    write(ofile,'("Trust radii for each atom:")')
+    write(ofile,'("    ",5f14.8)') rtrust
+    do i = 1,mol%natoms + ndum
+        if (rtrust(i) < 1e-8) then
+            write(ofile,'("Trust radius of zero for atom ",i4)') i
+            stop "bader - zero trust radius"
+        end if
+    end do
     write(ofile,'("")')
-    write(ofile,'("Total charge: ",f14.8)') sum(charge)
-    write(ofile,'("Final charges:")')
-    write(ofile,'("    ",5f14.8)') charge
-    ! write the last shell
-    rewind mfile
-    mol_integrate_last: do ipt = 1,npts
-        if (asgn(2,ipt) == 0) asgn(2,ipt) = -1
-        write(mfile) rhomol(2,ipt), -asgn(2,ipt)
-        write(pfile,1000) xyzw_nxt(4,ipt), xyz(2,:,ipt), rhomol(2,ipt)
-    end do mol_integrate_last
-    call system("cp moldens moldens.all")
+    deallocate (rhomol, drho, dist, ed, er, cosa)
     !
-    !  Propagate assignments backwards
+    !  Molecular density numerical integration loop
     !
-    open(nfile, file='snedlom', form='unformatted', action='read')
-    propagate_back: do i = 1,nbatch-1
-        ! if any point isn't assigned to an atom, it must point outwards
+    write(ofile,'("Starting QTAIM density assignment")')
+    write(ofile,'("")')
+    open(mfile, file='moldens', form='unformatted', action='read')
+    call GridPointsBatch(den_grid, 'Reset')
+    charge = 0_rk
+    unchg = 0_rk
+    grid_batches: do ib = 1,nbatch
+        !
+        !  Get grid points
+        !
+        call GridPointsBatch(den_grid, 'Next batch', xyzw=xyzw)
+        !
+        !  If the batch size changed, reallocate rho and other values
+        !
+        npts = size(xyzw, dim=2)
+        if (allocated(rhomol)) then
+            if (size(rhomol) /= npts) deallocate (rhomol, drho, asgn)
+        end if
+        if (.not. allocated(rhomol)) allocate (rhomol(npts), drho(3,npts), asgn(npts))
+        !
+        !  Read in molecular densities and gradients
+        !
         read_rho: do ipt = 1,npts
-            read(nfile) rhomol(1,ipt), asgn(1,ipt)
+            read(mfile) rhomol(ipt), drho(1,ipt), drho(2,ipt), drho(3,ipt)
         end do read_rho
-        rewind mfile
-        prop_bk_shell: do ipt = 1,npts
-            if (asgn(1,ipt) > 0) then
-                asgn(1,ipt) = asgn(2,asgn(1,ipt))
-            else if (asgn(1,ipt) == 0) then
-                ! this should only happen if weight*density is zero
-                asgn(1,ipt) = -1
+        !
+        !  Propagate and assign densities
+        !
+        iat = den_grid%next_part + ndum
+        asgn = assign_atom(xyzq(1:3,:), 0.9*rtrust, natom, xyzw, npts, ndum, rhomol, drho)
+        !
+        !  Integrate assigned charges
+        !
+        chg_integrate: do ipt = 1,npts
+            iat = asgn(ipt)
+            if (iat == 0) then
+                unchg = unchg + xyzw(4,ipt) * rhomol(ipt)
+            else
+                charge(iat) = charge(iat) + xyzw(4,ipt) * rhomol(ipt)
             end if
-            write(mfile) rhomol(1,ipt), -asgn(1,ipt)
-        end do prop_bk_shell
-        call system("cat moldens moldens.all > moldens.tmp")
-        call system("mv moldens.tmp moldens.all")
-        rhomol(2,:) = rhomol(1,:)
-        asgn(2,:) = asgn(1,:)
-    end do propagate_back
-    call system("mv moldens.all moldens")
+        end do chg_integrate
+    end do grid_batches
+
+    write(ofile,'("Unassigned density: ",f14.8)') unchg
+    write(ofile,'("Atomic populations:")')
+    write(ofile,'("    ",5f14.8)') charge
+    write(ofile,'("")')
+    write(ofile,'("Final charges:")')
+    write(ofile,'("    ",5f14.8)') xyzq(4,:) - charge
     !
     !  Clean up
     !
     call GridDestroy(den_grid)
     close(mfile)
-    close(nfile)
-    close(pfile)
-    call system("rm snedlom")
-    if (trim(inp%atom_type) == "pop") then
-        call system("rm moldens")
-    end if
+    call system("rm moldens")
+    ! write assignments?
     write(ofile,'("")')
     write(ofile,'("Exited successfully")')
     close(ofile)
@@ -272,262 +250,85 @@ program bader
 contains
 
 !
-!  Find the indices of the smallest n elements of a list the slow way
+!  Determine the QTAIM atomic assignments for grid points
 !
-!  For small list sizes (< 10^5) and small nsm, the advantages of
-!  quicksort are negligible
-!
-function argslow(nsm, l, nl) result(sm)
-    integer(ik) :: nl, nsm, sm(nsm)
-    real(rk)    :: l(nl)
+function assign_atom(xyzatm, rad, natm, xyzw, npt, ndum, rho, drho)
+    integer(ik) :: natm, npt, ndum
+    real(rk)    :: xyzatm(3,natm), rad(natm), xyzw(4,npt)
+    real(ark)   :: rho(npt), drho(3,npt)
+    integer(ik) :: assign_atom(npt)
     !
-    integer(ik) :: i, j
+    logical     :: adone(npt)
+    integer(ik) :: ipt, iat, iter, max_iter=1000
+    real(rk)    :: dist, dnorm, thresh=1e-8
 
-    sm(:) = 0
-    find_smallest: do i = 1, nsm
-        l_loop: do j = 1, nl
-            if (any(sm == j)) cycle l_loop
-            if (sm(i) == 0) then
-                sm(i) = j
-                cycle l_loop
-            end if
-            if (l(j) < l(sm(i))) sm(i) = j
-        end do l_loop
-    end do find_smallest
-end function argslow
-
-!
-!  Determine the Bader atomic assignments
-!
-subroutine assign_shell(xyz, wrho, drho, asgn, adone, npts, xyzq, atmchg, natm, nrst, nnn, ls)
-    integer(ik)           :: npts, natm, nnn(npts), asgn(2,npts), nrst(7,npts)
-    real(rk)              :: xyz(2,3,npts), xyzq(4,natm), atmchg(natm)
-    real(ark)             :: wrho(2,npts), drho(2,3,npts)
-    logical               :: adone(2,npts), ls
-    !
-    integer(ik)           :: i, j, k, n, iout(2,npts), o_ji, a_ji, o_next, a_next, iatm
-    integer(ik),parameter :: maxitr=120
-    real(rk)              :: dist(natm), din(3)
-    logical               :: shell_done, askip(2,npts)
-
-    iout(:,:) = 1
-    askip(:,:) = .false.
-
-    make_assignments: do i = 1, npts
-        if (.not. adone(1,i)) then
-            if (sqrt(sum(drho(1,:,i)**2)) < 1e-36) then
-                ! gradient is zero, skip it
-                if (wrho(1,i) > 1e-36) write(out,'("WARNING: skipping zero gradient with density ",e12.4)') wrho(1,i)
-                adone(1,i) = .true.
-            else
-                ! make assignments for inner shell
-                call assign_point(drho(1,:,i), xyz, npts, nrst(:,i), nnn(i), .false., iout(1,i), asgn(1,i))
-            end if
-        end if
-
-        if (.not. adone(2,i)) then
-            din = xyz(1,:,i) - xyz(2,:,i)
-            if (sqrt(sum(drho(2,:,i)**2)) < 1e-36) then
-                ! gradient is zero, skip it
-                if (wrho(2,i) > 1e-36) write(out,'("WARNING: skipping zero gradient with density ",e12.4)') wrho(2,i)
-                adone(2,i) = .true.
-            else if (unit_dot(din, drho(2,:,i), 3) < 0 .and. .not. ls) then
-                ! gradient pointing out, come back after next shell is loaded
-                askip(2,i) = .true.
-            else
-                ! make assignments for outer shell
-                call assign_point(drho(2,:,i), xyz, npts, nrst(:,i), nnn(i), .true., iout(2,i), asgn(2,i))
-            end if
-        end if
-    end do make_assignments
-
-    propagate_assignments: do k = 1, maxitr
-        shell_done = .true.
-        loop_shells: do j = 1, 2
-            propagate_shell: do i = 1, npts
-                if (adone(j,i) .or. askip(j,i)) cycle propagate_shell
-                o_ji = iout(j,i)
-                a_ji = asgn(j,i)
-                o_next = iout(o_ji,a_ji)
-                a_next = asgn(o_ji,a_ji)
-                if (o_next == j .and. a_next == i) then
-                    ! repetition
-                    ! try to assign to the same point as a neighbour
-                    chk_nbours0: do n = 2, nnn(i)
-                        if (asgn(j,nrst(n,i)) < 0) then
-                            iatm = -asgn(j,nrst(n,i))
-                            asgn(j,i) = -iatm
-                            atmchg(iatm) = atmchg(iatm) - wrho(j,i)
-                            adone(j,i) = .true.
-                            exit chk_nbours0
-                        else if (asgn(3-j,nrst(n,i)) < 0) then
-                            iatm = -asgn(3-j,nrst(n,i))
-                            asgn(j,i) = -iatm
-                            atmchg(iatm) = atmchg(iatm) - wrho(j,i)
-                            adone(j,i) = .true.
-                            exit chk_nbours0
-                        end if
-                    end do chk_nbours0
-                    chk_nbours1: do n = 1, nnn(a_ji)
-                        if (asgn(o_ji,nrst(n,a_ji)) < 0) then
-                            iatm = -asgn(o_ji,nrst(n,a_ji))
-                            asgn(o_ji,a_ji) = -iatm
-                            atmchg(iatm) = atmchg(iatm) - wrho(o_ji,a_ji)
-                            adone(o_ji,a_ji) = .true.
-                            exit chk_nbours1
-                        else if (asgn(3-o_ji,nrst(n,a_ji)) < 0) then
-                            iatm = -asgn(3-o_ji,nrst(n,a_ji))
-                            asgn(o_ji,a_ji) = -iatm
-                            atmchg(iatm) = atmchg(iatm) - wrho(o_ji,a_ji)
-                            adone(o_ji,a_ji) = .true.
-                            exit chk_nbours1
-                        end if
-                    end do chk_nbours1
-                    ! otherwise assign to the nearest nucleus
-                    if (.not. adone(j,i)) then
-                        do n = 1, natm
-                            dist(n) = sqrt(sum((xyz(j,:,i) - xyzq(1:3,n))**2))
-                        end do
-                        iatm = minloc(dist, 1)
-                        asgn(j,i) = -iatm
-                        atmchg(iatm) = atmchg(iatm) - wrho(j,i)
-                        adone(j,i) = .true.
+    adone(:) = .false.
+    propagate_density: do iter = 1,max_iter
+        assign_points: do ipt = 1,npt
+            if (.not.adone(ipt)) then
+                ! assign points within trust spheres
+                do iat = 1+ndum,natm
+                    dist = sqrt(sum((xyzw(1:3,ipt) - xyzatm(:,iat))**2))
+                    if (dist <= rad(iat)) then
+                        assign_atom(ipt) = iat
+                        adone(ipt) = .true.
+                        cycle assign_points
                     end if
-                    if (.not. adone(o_ji,a_ji)) then
-                        do n = 1, natm
-                            dist(n) = sqrt(sum((xyz(o_ji,:,a_ji) - xyzq(1:3,n))**2))
-                        end do
-                        iatm = minloc(dist, 1)
-                        atmchg(iatm) = atmchg(iatm) - wrho(o_ji,a_ji)
-                        asgn(o_ji,a_ji) = -iatm
-                        adone(o_ji,a_ji) = .true.
-                    end if
-                else if (a_next == 0) then
-                    if (j == 1) then
-                        ! pointed-to index out but not assigned, add to density (caching would happen here)
-                        wrho(o_ji,a_ji) = wrho(o_ji,a_ji) + wrho(j,i)
-                        adone(j,i) = .true.
-                    else
-                        ! outer shell to unassigned outer shell, come back after loading next shell
-                        askip(j,i) = .true.
-                    end if
-                else if (a_next < 0) then
-                    ! pointed-to index is an atom, add to atomic density
-                    asgn(j,i) = a_next
-                    iatm = -a_next
-                    atmchg(iatm) = atmchg(iatm) - wrho(j,i)
-                    adone(j,i) = .true.
-                else
-                    ! pointed-to index is assigned, keep propagating
-                    asgn(j,i) = a_next
-                    iout(j,i) = o_next
+                end do
+                ! screen small density values
+                if (rho(ipt)*xyzw(4,ipt) < thresh) then
+                    adone(ipt) = .true.
+                    assign_atom(ipt) = 0
+                    cycle assign_points
                 end if
-
-                !shell_done = shell_done .and. (adone(j,i) .or. askip(j,i))
-            end do propagate_shell
-        end do loop_shells
-
-        shell_done = all(adone .or. askip)
-        if (shell_done) then
-            ! all points going out or assigned to atoms
-            exit propagate_assignments
-        else if (k == maxitr) then
-            write(out,'("Shell assignments not finished in maximum number of iterations")')
-            stop "propagate_assignments: Maximum iterations exceeded"
+                ! find potential non-nuclear attractors (just error for now)
+                dnorm = sqrt(sum(drho(:,ipt)**2))
+                if ((rho(ipt) > 1e-4).and.(dnorm < thresh)) then
+                    write(ofile,'("assign_atom: non-nuclear attractors not supported")')
+                    stop "assign_atom - non-nuclear attractors not supported"
+                end if
+                ! propagate point by one step
+                call rkfour(xyzw(1:3,ipt), drho(3,ipt))
+            end if
+        end do assign_points
+        if (all(adone)) then
+            return
+        else if (iter == max_iter) then
+            write(ofile,'("QTAIM trajectories not converged in MAXITER = ",i4)') max_iter
+            stop "assign_atom - QTAIM trajectories not converged"
         end if
-    end do propagate_assignments
-end subroutine assign_shell
+    end do propagate_density
+
+end function assign_atom
 
 !
-!  Assign a single point to anoter points based on the steepest ascent
+!  Propagate grid positions by the density gradients
 !
-subroutine assign_point(idrho, xyz, npts, inrst, nni, outer, iiout, iasgn)
-    integer(ik) :: npts, nni, inrst(7), iiout, iasgn
-    real(rk)    :: idrho(3), xyz(2,3,npts)
-    logical     :: outer
+subroutine rkfour(xyz, dxyz)
+    real(rk),intent(inout)  :: xyz(3)
+    real(ark),intent(inout) :: dxyz(3)
     !
-    integer(ik) :: itr
-    real(rk)    :: vdot, vdotmx, xyzi(3), xyz0(3,nni), xyz1(3,nni), dv(3)
+    integer(ik)            :: i
+    real(rk)               :: new_xyz(3,1), k(3,4), wgt(4), coef(3), delta=0.3
+    real(ark)              :: rho(1), drho(3,1)
 
-    ! find position and neighbours on current shell and other shell
-    if (outer) then
-        xyzi = xyz(2,:,inrst(1))
-        do itr = 1, nni
-            xyz0(:,itr) = xyz(2,:,inrst(itr))
-            xyz1(:,itr) = xyz(1,:,inrst(itr))
-        end do
-    else
-        xyzi = xyz(1,:,inrst(1))
-        do itr = 1, nni
-            xyz0(:,itr) = xyz(1,:,inrst(itr))
-            xyz1(:,itr) = xyz(2,:,inrst(itr))
-        end do
-    end if
-
-    iiout = 0
-    vdotmx = -2
-
-    ! check if in current shell
-    current_shell: do itr = 2, nni
-        dv = xyz0(:,itr) - xyzi
-        vdot = unit_dot(idrho, dv, 3)
-        if (vdot > vdotmx) then
-            iasgn = inrst(itr)
-            vdotmx = vdot
-            iiout = 1
+    wgt = (/ 0.5_rk, 1.0_rk, 1.0_rk, 0.5_rk /) / 3.0_rk
+    coef = (/ 0.5_rk, 0.5_rk, 1.0_rk /)
+    new_xyz(:,1) = xyz
+    drho(:,1) = dxyz
+    rk_step: do i = 1,4
+        k(:,i) = delta*drho(:,1)
+        if (i < 4) then
+            new_xyz(:,1) = new_xyz(:,1) + coef(i)*k(:,i)
+            call evaluate_density_gradients(inp%vec_type, nat_count, 1,  mol, nat_occ, new_xyz, rho, drho)
         end if
-    end do current_shell
+        xyz = xyz + wgt(i)*k(:,i)
+    end do rk_step
+    new_xyz(:,1) = xyz
+    print *,wgt(1)*k(:,1)+wgt(2)*k(:,2)+wgt(3)*k(:,3)+wgt(4)*k(:,4)
+    call evaluate_density_gradients(inp%vec_type, nat_count, 1,  mol, nat_occ, new_xyz, rho, drho)
+    dxyz = drho(:,1)
 
-    ! check if in other shell
-    other_shell: do itr = 1, nni
-        dv = xyz1(:,itr) - xyzi
-        vdot = unit_dot(idrho, dv, 3)
-        if (vdot > vdotmx) then
-            iasgn = inrst(itr)
-            vdotmx = vdot
-            iiout = 2
-        end if
-    end do other_shell
-
-
-    if (vdotmx == -2) then
-        print *,"drho = ",idrho
-        write(out,'("Assignment not found for current point")')
-        stop "assign_point: Assignment not found"
-    end if
-
-    ! switch iout index if current shell is outer shell
-    if (outer) then
-        iiout = 3 - iiout
-    end if
-end subroutine assign_point
-
-!
-!  Evaluate the dot product of unit vectors of u and v
-!
-function unit_dot(u, v, nd)
-    integer(ik) :: nd
-    real(rk)    :: u(nd), v(nd), unit_dot
-    !
-    real(rk)    :: norm_u, norm_v
-
-    norm_u = sqrt(sum(u**2))
-    norm_v = sqrt(sum(v**2))
-    unit_dot = sum((u * v) / (norm_u * norm_v))
-end function unit_dot
-
-!
-!  Evaluate the vector v minus its projection on a vector u
-!
-function projout(u, v, nd)
-    integer(ik) :: nd
-    real(rk)    :: u(nd), v(nd), projout(nd)
-    !
-    real(rk)    :: udotv, vdotv
-
-    udotv = sum(u * v)
-    vdotv = sum(v**2)
-    projout = u - (udotv/vdotv) * v
-end function projout
+end subroutine rkfour
 
 end program bader

@@ -75,13 +75,14 @@ program gridchg
         atypes(i) = trim(mol%atoms(i)%name)
         write(ofile,'("    ",a2,3f14.8)') atypes(i), xyzq(1:3,i)
         ! count dummy atoms (assumes they are at first indices)
-        if (atypes(i) == 'X') ndum = ndum + 1
+        if (xyzq(4,i) < 0.5) ndum = ndum + 1
     end do
     write(ofile,'("")')
     !
     !  Import the promolecular basis
     !
     promol = mol
+    if (ndum > 0) write(ofile,'("Removing ",i3," dummy atom(s) from grid")') ndum
     call gamess_reload_basis(file=inp%extbas, basname=inp%atom_bas, structure=promol)
     do i = 1,promol%natoms
         npshell(i) = promol%atoms(i)%nshell
@@ -109,7 +110,7 @@ program gridchg
             call GridPointsBatch(den_grid, 'Next batch', xyzw=xyzw)
             xyz => xyzw(1:3,:)
             !
-            !  If the batch size changed, reallocate rho()
+            !  If the batch size changed, reallocate rho
             !
             npts = size(xyzw, dim=2)
             if (allocated(rhomol)) then
@@ -291,11 +292,13 @@ contains
 function assign_atom(xyzatm, natm, xyz, npt, ndum, rho, iatom, wtyp)
     character(5) :: wtyp
     integer(ik)  :: natm, npt, ndum, iatom
-    real(rk)     :: xyzatm(3,natm), xyz(3,npt), rho(natm,npt)
+    real(rk)     :: xyzatm(3,natm), xyz(3,npt)
+    real(ark)    :: rho(natm,npt)
     real(rk)     :: assign_atom(natm,npt)
     !
     integer(ik)  :: ipt, imin, iat
-    real(rk)     :: dist(natm), rhotot(npt)
+    real(rk)     :: dist(natm)
+    real(ark)    :: rhotot(npt)
 
     select case (wtyp)
         case ("becke")
