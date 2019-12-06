@@ -90,11 +90,11 @@ subroutine evaluate_density(vtyp, nat_count, npt, mol, nat_occ, xyz, rho)
         case ("tr1rdm")
             evaluate_rdm: do ird=1,nat_count
                 imo = 2*ird - 1
-                rho = rho + nat_occ(ird) * moval(imo,:) * moval(imo+1,:)
+                rho = rho + nat_occ(ird)*moval(imo,:)*moval(imo+1,:)
             end do evaluate_rdm
         case ("natorb")
             evaluate_nat: do ird=1,nat_count
-                rho = rho + nat_occ(ird) * moval(ird,:)**2
+                rho = rho + nat_occ(ird)*moval(ird,:)**2
             end do evaluate_nat
         case default
             write(out,'("evaluate_density: Unrecognized VEC type ",a8)') vtyp
@@ -146,16 +146,16 @@ subroutine evaluate_density_gradients(vtyp, nat_count, npt, mol, nat_occ, xyz, r
         case ("tr1rdm")
             evaluate_rdm: do ird=1,nat_count
                 imo = 2*ird - 1
-                rho = rho + nat_occ(ird) * moval(imo,:) * moval(imo+1,:)
+                rho = rho + nat_occ(ird)*moval(imo,:)*moval(imo+1,:)
                 do ic = 1, 3
-                    drho(ic,:) = drho(ic,:) + nat_occ(ird) * (moval(imo,:) * dmoval(ic,imo+1,:) + moval(imo+1,:) * dmoval(ic,imo,:))
+                    drho(ic,:) = drho(ic,:) + nat_occ(ird)*(moval(imo,:)*dmoval(ic,imo+1,:) + moval(imo+1,:)*dmoval(ic,imo,:))
                 end do
             end do evaluate_rdm
         case ("natorb")
             evaluate_nat: do ird=1,nat_count
-                rho = rho + nat_occ(ird) * moval(ird,:)**2
+                rho = rho + nat_occ(ird)*moval(ird,:)**2
                 do ic = 1, 3
-                    drho(ic,:) = drho(ic,:) + 2 * nat_occ(ird) * moval(ird,:) * dmoval(ic,ird,:)
+                    drho(ic,:) = drho(ic,:) + 2*nat_occ(ird)*moval(ird,:)*dmoval(ic,ird,:)
                 end do
             end do evaluate_nat
         case default

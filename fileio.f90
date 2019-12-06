@@ -26,7 +26,6 @@ module fileio
     character(8)        :: atom_bas      ! the atomic basis used for atomic densities
     character(100)      :: extbas        ! the external basis set library
     character(100)      :: lib_dmat      ! the path to the radial atomic density matrices
-    integer(ik)         :: n_rad_atom    ! the number of radial points for the atom library
     integer(ik)         :: max_iter      ! the maximum number of iterations for promolecule methods
     real(rk)            :: chg_thresh    ! the threshold for charge convergence of promolecule methods
   end type input_data
@@ -56,7 +55,6 @@ subroutine read_input(inf, struct)
     struct%atom_bas     = "APVTZ"
     struct%extbas       = "/globalhome/rymac/Projects/PartialCharge/partdens/atomlib/extbas"
     struct%lib_dmat     = "/globalhome/rymac/Projects/PartialCharge/partdens/atomlib/mp2.dmat"
-    struct%n_rad_atom   = 70
     struct%max_iter     = 100
     struct%chg_thresh   = 1e-4
 
@@ -88,8 +86,6 @@ subroutine read_input(inf, struct)
                 read(var,*,iostat=ios) struct%n_rad
             case ("n_ang")
                 read(var,*,iostat=ios) struct%n_ang
-            case ("n_rad_atom")
-                read(var,*,iostat=ios) struct%n_rad_atom
             case ("max_charge")
                 read(var,*,iostat=ios) struct%max_charge
             case ("max_iter")
@@ -154,7 +150,6 @@ subroutine init_gridchg_output(ouf, struct)
     write(ouf,'("    atom_bas       =   ",a15)') trim(struct%atom_bas)
     write(ouf,'("    extbas         =   ",a)') trim(struct%extbas)
     write(ouf,'("    lib_dmat       =   ",a)') trim(struct%lib_dmat)
-    write(ouf,'("    n_rad_atom     =   ",i15)') struct%n_rad_atom
     write(ouf,'("    max_iter       =   ",i15)') struct%max_iter
     write(ouf,'("    chg_thresh     =   ",e15.3)') struct%chg_thresh
     write(ouf,'("")')

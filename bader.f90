@@ -25,7 +25,7 @@ program bader
     !
     character(2),allocatable :: atypes(:)
     logical                  :: ptrust
-    integer(ik)              :: ofile, mfile, nfile, pfile
+    integer(ik)              :: ofile, mfile, nfile, pfile, gfile
     integer(ik)              :: i, ib, ipt, npts, iat
     integer(ik)              :: nat_count, natom, ndum, nbatch
     integer(ik),allocatable  :: asgn(:)
@@ -44,6 +44,7 @@ program bader
     mfile=11
     nfile=12
     pfile=13
+    gfile=14
 
     open(ofile, file="bader.out")
     call read_input(input, inp)
@@ -99,6 +100,7 @@ program bader
     call GridPointsBatch(den_grid, 'Batches count', count=nbatch)
     open(mfile, file='moldens', form='unformatted', action='write')
     open(pfile, file='dens.mol', action='write')
+    open(gfile, file='grad.mol', action='write')
     !
     !  Molecular density numerical integration loop
     !
@@ -106,7 +108,7 @@ program bader
     nullify(xyzw)
     norm = 0_rk
     rtrust = 0_rk
-    iat = 1
+    iat = 1 + ndum
     ptrust = .true.
     mol_grid_batches: do ib = 1,nbatch
         !
@@ -123,7 +125,7 @@ program bader
         end if
         if (.not. allocated(rhomol)) allocate (rhomol(npts), drho(3,npts), dist(3,npts), ed(3,npts), er(3,npts), cosa(npts))
         !
-        !  Evaluate density and gradients of each grid point
+        !  Evaluate density and gradients at grid points
         !
         call evaluate_density_gradients(inp%vec_type, nat_count, npts,  mol, nat_occ, xyz, rhomol, drho)
         !
@@ -142,6 +144,7 @@ program bader
             end do
             ! find cos(ed.er)
             cosa = sum(ed*er, dim=1)
+            print *,cosa
             ! check for gradients that point away from the centre
             check_cosa: do ipt = 1,npts
                 if (cosa(ipt) < 0.5_rk*sqrt(2.0_rk)) then
@@ -155,22 +158,24 @@ program bader
             end if
         end if
         if (den_grid%next_part + ndum /= iat) then
-            ! start propagating if the atom centre has changed
+            ! start propagating if the atom centre will change
             ptrust = .true.
             iat = den_grid%next_part + ndum
-            rtrust(iat) = 1e-4 ! It seems like I need to do this? Trust sphere too small for H...
         end if
         !
         !  Integrate and save
         !
         mol_integrate: do ipt = 1,npts
             norm = norm + xyzw(4,ipt) * rhomol(ipt)
-            write(mfile) rhomol(ipt), drho(1,ipt), drho(2,ipt), drho(3,ipt)
+            write(mfile) rhomol(ipt), drho(1:3,ipt)
             write(pfile,1000) xyzw(4,ipt), xyzw(1:3,ipt), rhomol(ipt)
+            write(gfile,1000) xyzw(4,ipt), drho(1:3,ipt), rhomol(ipt)
         end do mol_integrate
+        stop 'Not an error. End of first shell, check dens.mol and grad.mol.'
     end do mol_grid_batches
     close(mfile)
     close(pfile)
+    close(gfile)
     write(ofile,'("Total molecular density: ",f14.8)') norm
     write(ofile,'("Trust radii for each atom:")')
     write(ofile,'("    ",5f14.8)') rtrust
@@ -208,12 +213,13 @@ program bader
         !  Read in molecular densities and gradients
         !
         read_rho: do ipt = 1,npts
-            read(mfile) rhomol(ipt), drho(1,ipt), drho(2,ipt), drho(3,ipt)
+            read(mfile) rhomol(ipt), drho(1:3,ipt)
         end do read_rho
         !
         !  Propagate and assign densities
         !
         iat = den_grid%next_part + ndum
+        print *,ib
         asgn = assign_atom(xyzq(1:3,:), 0.9*rtrust, natom, xyzw, npts, ndum, rhomol, drho)
         !
         !  Integrate assigned charges
@@ -260,35 +266,41 @@ function assign_atom(xyzatm, rad, natm, xyzw, npt, ndum, rho, drho)
     !
     logical     :: adone(npt)
     integer(ik) :: ipt, iat, iter, max_iter=1000
-    real(rk)    :: dist, dnorm, thresh=1e-8
+    real(rk)    :: dist(natm), delta, thresh=1e-8
+    real(ark)   :: dnorm, rho_copy(npt)
 
     adone(:) = .false.
+    assign_atom(:) = 0
+    rho_copy = rho
     propagate_density: do iter = 1,max_iter
         assign_points: do ipt = 1,npt
             if (.not.adone(ipt)) then
                 ! assign points within trust spheres
                 do iat = 1+ndum,natm
-                    dist = sqrt(sum((xyzw(1:3,ipt) - xyzatm(:,iat))**2))
-                    if (dist <= rad(iat)) then
+                    dist(iat) = sqrt(sum((xyzw(1:3,ipt) - xyzatm(:,iat))**2))
+                    if (dist(iat) <= rad(iat)) then
                         assign_atom(ipt) = iat
                         adone(ipt) = .true.
                         cycle assign_points
                     end if
                 end do
                 ! screen small density values
-                if (rho(ipt)*xyzw(4,ipt) < thresh) then
+                if (rho_copy(ipt)*xyzw(4,ipt) < thresh) then
                     adone(ipt) = .true.
-                    assign_atom(ipt) = 0
                     cycle assign_points
                 end if
                 ! find potential non-nuclear attractors (just error for now)
                 dnorm = sqrt(sum(drho(:,ipt)**2))
-                if ((rho(ipt) > 1e-4).and.(dnorm < thresh)) then
+                if ((rho_copy(ipt) > 1e-4).and.(dnorm < thresh)) then
                     write(ofile,'("assign_atom: non-nuclear attractors not supported")')
-                    stop "assign_atom - non-nuclear attractors not supported"
+                    adone(ipt) = .true.
+                    !stop "assign_atom - non-nuclear attractors not supported"
+                    cycle assign_points
                 end if
                 ! propagate point by one step
-                call rkfour(xyzw(1:3,ipt), drho(3,ipt))
+                delta = min(0.99*minval(dist), 0.01)
+                !call rkfour(xyzw(1:3,ipt), drho(3,ipt), rho_copy(ipt), delta)
+                call euler(xyzw(1:3,ipt), drho(3,ipt), rho_copy(ipt), delta)
             end if
         end do assign_points
         if (all(adone)) then
@@ -302,33 +314,82 @@ function assign_atom(xyzatm, rad, natm, xyzw, npt, ndum, rho, drho)
 end function assign_atom
 
 !
-!  Propagate grid positions by the density gradients
+!  Propagate grid positions by the density gradients using RK4
 !
-subroutine rkfour(xyz, dxyz)
+subroutine rkfour(xyz, dxyz, rho, delta)
+    real(rk),intent(in)     :: delta
     real(rk),intent(inout)  :: xyz(3)
-    real(ark),intent(inout) :: dxyz(3)
+    real(ark),intent(inout) :: dxyz(3), rho
     !
-    integer(ik)            :: i
-    real(rk)               :: new_xyz(3,1), k(3,4), wgt(4), coef(3), delta=0.3
-    real(ark)              :: rho(1), drho(3,1)
+    integer(ik)             :: i, it, max_it=100
+    real(rk)                :: kxyz(3,1), fxyz(3), k(3,4), wgt(4), coef(3), sc
+    real(ark)               :: rho_step(1), drho_step(3,1)
 
     wgt = (/ 0.5_rk, 1.0_rk, 1.0_rk, 0.5_rk /) / 3.0_rk
     coef = (/ 0.5_rk, 0.5_rk, 1.0_rk /)
-    new_xyz(:,1) = xyz
-    drho(:,1) = dxyz
-    rk_step: do i = 1,4
-        k(:,i) = delta*drho(:,1)
-        if (i < 4) then
-            new_xyz(:,1) = new_xyz(:,1) + coef(i)*k(:,i)
-            call evaluate_density_gradients(inp%vec_type, nat_count, 1,  mol, nat_occ, new_xyz, rho, drho)
+
+    ! maximum step size
+    sc = delta / sqrt(sum(dxyz**2))
+
+    try_step: do it = 1,max_it
+        fxyz = xyz
+        kxyz(:,1) = xyz
+        drho_step(:,1) = dxyz
+        rk_step: do i = 1,4
+            k(:,i) = sc*drho_step(:,1)
+            if (i < 4) then
+                kxyz(:,1) = kxyz(:,1) + coef(i)*k(:,i)
+                call evaluate_density_gradients(inp%vec_type, nat_count, 1,  mol, nat_occ, kxyz, rho_step, drho_step)
+            end if
+            fxyz = fxyz + wgt(i)*k(:,i)
+        end do rk_step
+        kxyz(:,1) = fxyz
+        !print *,wgt(1)*k(:,1)+wgt(2)*k(:,2)+wgt(3)*k(:,3)+wgt(4)*k(:,4)
+        call evaluate_density_gradients(inp%vec_type, nat_count, 1,  mol, nat_occ, kxyz, rho_step, drho_step)
+        if (rho_step(1) >= rho) exit try_step ! comment out to test propagation
+        ! if density decreases, scale step and try again
+        if (it == max_it) then
+            write(ofile,'("Density decreasing after maximum number of attemps")')
+            !stop "rkfour - density decreasing"
         end if
-        xyz = xyz + wgt(i)*k(:,i)
-    end do rk_step
-    new_xyz(:,1) = xyz
-    print *,wgt(1)*k(:,1)+wgt(2)*k(:,2)+wgt(3)*k(:,3)+wgt(4)*k(:,4)
-    call evaluate_density_gradients(inp%vec_type, nat_count, 1,  mol, nat_occ, new_xyz, rho, drho)
-    dxyz = drho(:,1)
+        sc = 0.25*sc
+    end do try_step
+    xyz = fxyz
+    dxyz = drho_step(:,1)
+    rho = rho_step(1)
 
 end subroutine rkfour
+
+!
+!  Propagate grid positions by the density gradients using Euler
+!
+subroutine euler(xyz, dxyz, rho, delta)
+    real(rk),intent(in)     :: delta
+    real(rk),intent(inout)  :: xyz(3)
+    real(ark),intent(inout) :: dxyz(3), rho
+    !
+    integer(ik)             :: it, max_it=100
+    real(rk)                :: fxyz(3,1), sc
+    real(ark)               :: rho_step(1), drho_step(3,1)
+
+    ! maximum step size
+    sc = delta / sqrt(sum(dxyz**2))
+
+    try_step: do it = 1,max_it
+        fxyz(:,1) = xyz + sc*dxyz
+        call evaluate_density_gradients(inp%vec_type, nat_count, 1, mol, nat_occ, fxyz, rho_step, drho_step)
+        if (rho_step(1) >= rho) exit try_step
+        ! if density decreases, scale step and try again
+        if (it == max_it) then
+            write(ofile,'("Density decreasing after maximum number of attemps")')
+            stop "euler - density decreasing"
+        end if
+        sc = 0.25*sc
+    end do try_step
+    xyz = fxyz(:,1)
+    dxyz = drho_step(:,1)
+    rho = rho_step(1)
+
+end subroutine euler
 
 end program bader
